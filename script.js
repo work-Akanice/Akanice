@@ -372,7 +372,9 @@ function renderHome() {
   $("portalNotesCount").textContent = `${notes.length} GHI CHÚ`;
 }
 
-function showAppView(view) {
+function showAppView(view, { pushHistory = true } = {}) {
+  if (!["board", "list", "notes"].includes(view)) return;
+  if (pushHistory && history.state?.appView !== view) history.pushState({ appView: view }, "", `#${view}`);
   $("homeScreen").hidden = true;
   $("workspaceScreen").hidden = view !== "board";
   $("listScreen").hidden = view !== "list";
@@ -381,7 +383,8 @@ function showAppView(view) {
   if (view === "list") renderPersonalTasks();
   if (view === "notes") renderNotes();
 }
-function showHome() {
+function showHome({ pushHistory = true } = {}) {
+  if (pushHistory && history.state?.appView !== "home") history.pushState({ appView: "home" }, "", "#home");
   $("homeScreen").hidden = false;
   $("workspaceScreen").hidden = true;
   $("listScreen").hidden = true;
@@ -392,8 +395,12 @@ function showHome() {
 document.querySelectorAll("[data-open-view]").forEach((button) => {
   button.addEventListener("click", () => showAppView(button.dataset.openView));
 });
-document.querySelectorAll("[data-back-home]").forEach((button) => button.addEventListener("click", showHome));
-$ ("btnHomeReturn").addEventListener("click", showHome);
+window.addEventListener("popstate", (event) => {
+  const view = event.state?.appView;
+  if (view === "board" || view === "list" || view === "notes") showAppView(view, { pushHistory: false });
+  else showHome({ pushHistory: false });
+});
+try { history.replaceState({ appView: "home" }, "", "#home"); } catch (error) {}
 
 const makeLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const formatLocalDate = (value) => {
@@ -1125,6 +1132,7 @@ function deleteCat(type, name) {
 function afterMgrChange() { syncCatOrder(); save(); saveCats(); renderMgr(); render(); }
 
 $("btnMgr").onclick = () => { renderMgr(); mgr.showModal(); };
+$("btnHomeMgr").onclick = () => { renderMgr(); mgr.showModal(); };
 $("btnMgrClose").onclick = () => mgr.close();
 
 $("mgrBody").addEventListener("click", (e) => {

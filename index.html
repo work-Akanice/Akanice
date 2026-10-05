@@ -9,50 +9,37 @@
 <body>
   <main id="homeScreen" class="home-screen">
     <div class="home-sky" aria-hidden="true">
-      <span class="home-sun"></span>
-      <span class="home-cloud cloud-one"></span>
-      <span class="home-cloud cloud-two"></span>
-      <span class="home-bird bird-one">⌁</span>
-      <span class="home-bird bird-two">⌁</span>
-      <div class="home-mountains mountain-far"></div>
-      <div class="home-mountains mountain-near"></div>
-      <div class="home-hill"></div>
+      <span class="city-sun"></span>
+      <div class="city-backdrop"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="city-foreground"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="city-street"></div>
     </div>
     <header class="home-nav">
-      <a class="home-brand" href="#home" aria-label="Trang chủ Theo dõi công việc">
+      <div class="home-brand" aria-label="Akanice">
         <span class="brand-mark" aria-hidden="true">✦</span>
-        <span>WORK<span class="brand-dot">.</span>LAND</span>
-      </a>
-      <div class="home-nav-right"><span class="world-status"><i></i> THẾ GIỚI CỦA BẠN</span></div>
+        <span>Akanice</span>
+      </div>
+      <div class="home-nav-right"><span class="world-status"><i></i> CITY WORKSPACE</span></div>
     </header>
     <section class="home-hero">
       <div class="hero-copy">
-        <p class="eyebrow"><span class="eyebrow-line"></span> BẢN ĐỒ CÔNG VIỆC CỦA BẠN</p>
-        <h1>Mỗi ngày,<br><span>một hành trình</span><b>.</b></h1>
-        <p class="hero-description">Gom mọi đầu việc vào đúng thế giới của nó. Chọn một điểm đến và bắt đầu chuyến phiêu lưu hôm nay.</p>
-        <div class="hero-actions"><span class="hero-hint"><span aria-hidden="true">✳</span> Ba không gian, một hành trình của bạn</span></div>
+        <p class="eyebrow"><span class="eyebrow-line"></span> WORK · CREATE · GROW</p>
+        <h1>Akanice</h1>
       </div>
-      <div class="hero-orbit" aria-hidden="true">
-        <div class="orbit-ring ring-one"></div><div class="orbit-ring ring-two"></div>
-        <div class="orbit-star star-one">✦</div><div class="orbit-star star-two">✧</div>
-        <div class="hero-planet"><span class="planet-face">☺</span><span class="planet-ring"></span></div>
-        <div class="orbit-label label-top">YOUR NEXT QUEST</div><div class="orbit-label label-bottom">LEVEL UP · EVERY DAY</div>
-      </div>
-      <div class="hero-scroll" aria-hidden="true"><span></span> CUỘN ĐỂ KHÁM PHÁ</div>
+      <div class="hero-city-caption" aria-hidden="true"><span>YOUR CITY</span><i></i><span>YOUR WORKSPACE</span></div>
     </section>
-    <section class="home-destinations" aria-labelledby="destinationTitle">
-      <div class="destination-heading"><div><p class="eyebrow"><span class="eyebrow-line"></span> CHỌN KHÔNG GIAN</p><h2 id="destinationTitle">Bạn muốn làm gì hôm nay?</h2></div><span class="portal-count">03 LỐI VÀO</span></div>
+    <section class="home-destinations" aria-label="Các lối vào ứng dụng">
+      <div class="destination-heading"><div><p class="eyebrow"><span class="eyebrow-line"></span> CHỌN KHÔNG GIAN</p><h2>Không gian làm việc</h2></div><div class="home-category-actions"><button type="button" class="manage-categories" id="btnHomeMgr"><span aria-hidden="true">＋</span> Quản lý danh mục</button></div></div>
       <div class="destination-grid portal-grid">
-        <button type="button" class="destination-card portal-card portal-board" data-open-view="board"><span class="destination-symbol">▤</span><span class="destination-info"><small>01 · THEO DÕI CHI TIẾT</small><strong>Bảng công việc</strong><span class="portal-description">Tiếp tục quản lý đầu việc, deadline và người phụ trách.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalBoardCount"></span></button>
-        <button type="button" class="destination-card portal-card portal-list" data-open-view="list"><span class="destination-symbol">☑</span><span class="destination-info"><small>02 · DANH SÁCH LINH HOẠT</small><strong>Danh sách công việc</strong><span class="portal-description">Ghi nhanh việc cần làm, hạn chót và tiến độ hoàn thành.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalListCount"></span></button>
-        <button type="button" class="destination-card portal-card portal-notes" data-open-view="notes"><span class="destination-symbol">▧</span><span class="destination-info"><small>03 · GÓC LƯU TRỮ</small><strong>Thư viện ghi chú</strong><span class="portal-description">Cất giữ ý tưởng, nội dung họp và những điều cần nhớ.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalNotesCount"></span></button>
+        <button type="button" class="destination-card portal-card portal-board" data-open-view="board"><span class="portal-skyline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="destination-symbol">▤</span><span class="destination-info"><small>01 · THEO DÕI CHI TIẾT</small><strong>Bảng công việc</strong><span class="portal-description">Đầu việc, deadline và người phụ trách.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalBoardCount"></span></button>
+        <button type="button" class="destination-card portal-card portal-list" data-open-view="list"><span class="portal-skyline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="destination-symbol">☑</span><span class="destination-info"><small>02 · DANH SÁCH LINH HOẠT</small><strong>Danh sách công việc</strong><span class="portal-description">Việc cần làm, thời hạn và tiến độ.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalListCount"></span></button>
+        <button type="button" class="destination-card portal-card portal-notes" data-open-view="notes"><span class="portal-skyline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="destination-symbol">▧</span><span class="destination-info"><small>03 · GÓC LƯU TRỮ</small><strong>Thư viện ghi chú</strong><span class="portal-description">Lưu ý tưởng, nội dung họp và điều đáng nhớ.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalNotesCount"></span></button>
       </div>
     </section>
-    <footer class="home-footer"><span>WORK.LAND <span class="brand-dot">✦</span> KHỞI TẠO ĐIỀU TUYỆT VỜI</span><span id="homeSnapshot"></span></footer>
+    <footer class="home-footer"><span>AKANICE <span class="brand-dot">✦</span></span><span id="homeSnapshot"></span></footer>
   </main>
   <section id="workspaceScreen" class="workspace-screen">
   <header class="top">
-    <button type="button" class="home-return" id="btnHomeReturn" aria-label="Về trang chủ" title="Về trang chủ">⌂</button>
     <h1>Theo dõi công việc</h1>
     <span id="count" class="count"></span>
     <button id="btnMgr">Quản lý danh mục</button>
@@ -82,7 +69,6 @@
 
   <main id="listScreen" class="app-screen list-screen" hidden>
     <header class="screen-topbar list-topbar">
-      <button type="button" class="screen-home" data-back-home aria-label="Về trang chủ" title="Về trang chủ">⌂</button>
       <div class="screen-title"><span>WORK / PERSONAL</span><h1>Danh sách công việc</h1></div>
       <div class="list-toolbar"><label class="list-search"><span aria-hidden="true">⌕</span><input id="listSearch" type="search" placeholder="Tìm trong danh sách"></label><select id="listFilter" aria-label="Lọc trạng thái"><option value="all">Tất cả</option><option value="open">Chưa hoàn thành</option><option value="done">Đã hoàn thành</option><option value="late">Quá hạn</option></select><select id="listSort" aria-label="Sắp xếp"><option value="deadline">Hạn gần nhất</option><option value="created">Mới tạo</option><option value="title">Tên A–Z</option></select></div>
     </header>
@@ -95,11 +81,11 @@
   </main>
 
   <main id="notesScreen" class="app-screen notes-screen" hidden>
-    <header class="notes-topbar"><button type="button" class="screen-home notes-home" data-back-home aria-label="Về trang chủ" title="Về trang chủ">⌂</button><a class="notes-brand" href="#notes">FIELDNOTES<span> / THƯ VIỆN</span></a><div class="notes-top-actions"><label class="notes-search"><span aria-hidden="true">⌕</span><input id="noteSearch" type="search" placeholder="Tìm ghi chú"></label><button type="button" class="notes-add-button" id="btnNewNote"><span>＋</span> Ghi chú mới</button></div></header>
+    <header class="notes-topbar"><span class="notes-brand">FIELDNOTES<span> / THƯ VIỆN</span></span><div class="notes-top-actions"><label class="notes-search"><span aria-hidden="true">⌕</span><input id="noteSearch" type="search" placeholder="Tìm ghi chú"></label></div></header>
     <section class="notes-content">
       <div class="notes-heading">
         <div><p class="notes-overline">KHO Ý TƯỞNG CÁ NHÂN</p><h1>Thư viện ghi chú<span>.</span></h1><p class="notes-intro">Một nơi gọn gàng cho những điều đáng nhớ.</p></div>
-        <div class="notes-total"><strong id="noteTotal">0</strong><span>GHI CHÚ</span></div>
+        <div class="notes-heading-actions"><div class="notes-total"><strong id="noteTotal">0</strong><span>GHI CHÚ</span></div><button type="button" class="notes-add-button notes-add-fab" id="btnNewNote"><span>＋</span> Ghi chú mới</button></div>
       </div>
       <div class="notes-controls">
         <div class="notes-tabs" role="group" aria-label="Lọc ghi chú">
