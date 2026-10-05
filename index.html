@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Theo dõi công việc</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="homeScreen" class="home-screen">
+    <div class="home-sky" aria-hidden="true">
+      <span class="home-sun"></span>
+      <span class="home-cloud cloud-one"></span>
+      <span class="home-cloud cloud-two"></span>
+      <span class="home-bird bird-one">⌁</span>
+      <span class="home-bird bird-two">⌁</span>
+      <div class="home-mountains mountain-far"></div>
+      <div class="home-mountains mountain-near"></div>
+      <div class="home-hill"></div>
+    </div>
+    <header class="home-nav">
+      <a class="home-brand" href="#home" aria-label="Trang chủ Theo dõi công việc">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>WORK<span class="brand-dot">.</span>LAND</span>
+      </a>
+      <div class="home-nav-right"><span class="world-status"><i></i> THẾ GIỚI CỦA BẠN</span></div>
+    </header>
+    <section class="home-hero">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="eyebrow-line"></span> BẢN ĐỒ CÔNG VIỆC CỦA BẠN</p>
+        <h1>Mỗi ngày,<br><span>một hành trình</span><b>.</b></h1>
+        <p class="hero-description">Gom mọi đầu việc vào đúng thế giới của nó. Chọn một điểm đến và bắt đầu chuyến phiêu lưu hôm nay.</p>
+        <div class="hero-actions"><span class="hero-hint"><span aria-hidden="true">✳</span> Ba không gian, một hành trình của bạn</span></div>
+      </div>
+      <div class="hero-orbit" aria-hidden="true">
+        <div class="orbit-ring ring-one"></div><div class="orbit-ring ring-two"></div>
+        <div class="orbit-star star-one">✦</div><div class="orbit-star star-two">✧</div>
+        <div class="hero-planet"><span class="planet-face">☺</span><span class="planet-ring"></span></div>
+        <div class="orbit-label label-top">YOUR NEXT QUEST</div><div class="orbit-label label-bottom">LEVEL UP · EVERY DAY</div>
+      </div>
+      <div class="hero-scroll" aria-hidden="true"><span></span> CUỘN ĐỂ KHÁM PHÁ</div>
+    </section>
+    <section class="home-destinations" aria-labelledby="destinationTitle">
+      <div class="destination-heading"><div><p class="eyebrow"><span class="eyebrow-line"></span> CHỌN KHÔNG GIAN</p><h2 id="destinationTitle">Bạn muốn làm gì hôm nay?</h2></div><span class="portal-count">03 LỐI VÀO</span></div>
+      <div class="destination-grid portal-grid">
+        <button type="button" class="destination-card portal-card portal-board" data-open-view="board"><span class="destination-symbol">▤</span><span class="destination-info"><small>01 · THEO DÕI CHI TIẾT</small><strong>Bảng công việc</strong><span class="portal-description">Tiếp tục quản lý đầu việc, deadline và người phụ trách.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalBoardCount"></span></button>
+        <button type="button" class="destination-card portal-card portal-list" data-open-view="list"><span class="destination-symbol">☑</span><span class="destination-info"><small>02 · DANH SÁCH LINH HOẠT</small><strong>Danh sách công việc</strong><span class="portal-description">Ghi nhanh việc cần làm, hạn chót và tiến độ hoàn thành.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalListCount"></span></button>
+        <button type="button" class="destination-card portal-card portal-notes" data-open-view="notes"><span class="destination-symbol">▧</span><span class="destination-info"><small>03 · GÓC LƯU TRỮ</small><strong>Thư viện ghi chú</strong><span class="portal-description">Cất giữ ý tưởng, nội dung họp và những điều cần nhớ.</span></span><span class="destination-go" aria-hidden="true">↗</span><span class="destination-index" id="portalNotesCount"></span></button>
+      </div>
+    </section>
+    <footer class="home-footer"><span>WORK.LAND <span class="brand-dot">✦</span> KHỞI TẠO ĐIỀU TUYỆT VỜI</span><span id="homeSnapshot"></span></footer>
+  </main>
+  <section id="workspaceScreen" class="workspace-screen">
+  <header class="top">
+    <button type="button" class="home-return" id="btnHomeReturn" aria-label="Về trang chủ" title="Về trang chủ">⌂</button>
+    <h1>Theo dõi công việc</h1>
+    <span id="count" class="count"></span>
+    <button id="btnMgr">Quản lý danh mục</button>
+    <button id="btnImport">Nhập Excel</button>
+    <button id="btnAdd" class="primary">Thêm công việc</button>
+  </header>
+  <input id="importFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+
+ <section class="filters">
+  <input id="fSearch" type="search" placeholder="Tìm nhanh trong toàn bộ bảng">
+  <div class="quick-filters" role="group" aria-label="Lọc nhanh theo hạn">
+    <button type="button" class="quick-filter" data-quick-filter="late" aria-pressed="false">Trễ</button>
+    <button type="button" class="quick-filter" data-quick-filter="thisWeek" aria-pressed="false">Trong tuần</button>
+    <button type="button" class="quick-filter" data-quick-filter="nextWeek" aria-pressed="false">Tuần sau</button>
+  </div>
+  <button id="btnClear">Xóa tất cả bộ lọc</button>
+</section>
+
+  <div class="table-wrap">
+    <table>
+    <thead id="head"></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="empty" hidden>Không có công việc nào khớp bộ lọc. Bấm Xóa bộ lọc hoặc Thêm công việc.</p>
+  </div>
+  </section>
+
+  <main id="listScreen" class="app-screen list-screen" hidden>
+    <header class="screen-topbar list-topbar">
+      <button type="button" class="screen-home" data-back-home aria-label="Về trang chủ" title="Về trang chủ">⌂</button>
+      <div class="screen-title"><span>WORK / PERSONAL</span><h1>Danh sách công việc</h1></div>
+      <div class="list-toolbar"><label class="list-search"><span aria-hidden="true">⌕</span><input id="listSearch" type="search" placeholder="Tìm trong danh sách"></label><select id="listFilter" aria-label="Lọc trạng thái"><option value="all">Tất cả</option><option value="open">Chưa hoàn thành</option><option value="done">Đã hoàn thành</option><option value="late">Quá hạn</option></select><select id="listSort" aria-label="Sắp xếp"><option value="deadline">Hạn gần nhất</option><option value="created">Mới tạo</option><option value="title">Tên A–Z</option></select></div>
+    </header>
+    <section class="list-board-content">
+      <div class="list-subbar"><div class="list-view-label"><span>☷</span> Việc cần làm <span id="listCountLabel"></span></div><span class="list-board-hint">Chọn tiêu đề để mở ghi chú</span></div>
+      <div class="list-grid-wrap"><table class="list-grid-table"><thead><tr><th class="list-title-col">☷ <span>Title</span></th><th>▣ <span>Deadline</span></th><th>☑ <span>Done</span></th><th>▣ <span>Creation</span></th></tr></thead><tbody id="listRows"></tbody></table></div>
+      <p id="listEmpty" class="list-empty" hidden>Không có công việc phù hợp với bộ lọc.</p>
+    </section>
+    <footer class="list-footer"><span id="listFooterCount"></span><span>Dữ liệu được lưu trên thiết bị này</span></footer>
+  </main>
+
+  <main id="notesScreen" class="app-screen notes-screen" hidden>
+    <header class="notes-topbar"><button type="button" class="screen-home notes-home" data-back-home aria-label="Về trang chủ" title="Về trang chủ">⌂</button><a class="notes-brand" href="#notes">FIELDNOTES<span> / THƯ VIỆN</span></a><div class="notes-top-actions"><label class="notes-search"><span aria-hidden="true">⌕</span><input id="noteSearch" type="search" placeholder="Tìm ghi chú"></label><button type="button" class="notes-add-button" id="btnNewNote"><span>＋</span> Ghi chú mới</button></div></header>
+    <section class="notes-content">
+      <div class="notes-heading">
+        <div><p class="notes-overline">KHO Ý TƯỞNG CÁ NHÂN</p><h1>Thư viện ghi chú<span>.</span></h1><p class="notes-intro">Một nơi gọn gàng cho những điều đáng nhớ.</p></div>
+        <div class="notes-total"><strong id="noteTotal">0</strong><span>GHI CHÚ</span></div>
+      </div>
+      <div class="notes-controls">
+        <div class="notes-tabs" role="group" aria-label="Lọc ghi chú">
+          <button type="button" class="notes-tab active" data-note-filter="all" aria-pressed="true">Tất cả</button>
+          <button type="button" class="notes-tab" data-note-filter="pinned" aria-pressed="false">☆ Đã ghim</button>
+        </div>
+        <div class="notes-view-switch" role="group" aria-label="Cách xem thư viện">
+          <button type="button" class="active" data-note-view="grid" aria-label="Dạng lưới" title="Dạng lưới" aria-pressed="true">▦</button>
+          <button type="button" data-note-view="horizontal" aria-label="Dàn ngang" title="Dàn ngang" aria-pressed="false">⇆</button>
+          <button type="button" data-note-view="vertical" aria-label="Dàn dọc" title="Dàn dọc" aria-pressed="false">☰</button>
+        </div>
+        <label class="notes-tag-filter">Chủ đề <select id="noteTagFilter"><option value="all">Tất cả chủ đề</option></select></label>
+      </div>
+      <div id="notesGrid" class="notes-grid"></div>
+      <div id="notesEmpty" class="notes-empty" hidden><span>✳</span><h2>Trang đầu tiên còn đang chờ</h2><p>Tạo một ghi chú để gom những ý tưởng bạn muốn giữ lại.</p><button type="button" id="btnNotesEmptyAdd">＋ Viết ghi chú đầu tiên</button></div>
+    </section>
+    <footer class="notes-footer"><span>FIELDNOTES · YOUR PRIVATE ARCHIVE</span><span id="notesFooterMeta"></span></footer>
+  </main>
+
+  <dialog id="taskNoteDlg" class="task-note-dialog">
+    <div class="dlg-head"><div><p class="task-note-kicker">GHI CHÚ CÔNG VIỆC</p><h2 id="taskNoteDlgTitle">Chi tiết công việc</h2></div><button type="button" class="x" data-close aria-label="Đóng">&times;</button></div>
+    <form id="taskNoteForm" class="task-note-form"><label>Tiêu đề<input id="taskNoteTitle" name="title" required maxlength="180"></label><label>Hạn chót<input id="taskNoteDeadline" name="deadline" type="date"></label><label class="task-note-text-label">Ghi chú<textarea id="taskNoteText" name="note" rows="9" placeholder="Viết thông tin, ý tưởng hoặc nội dung liên quan đến công việc..."></textarea></label><section class="task-attachments"><div class="attachment-heading"><div><strong>Hình ảnh đính kèm</strong><small>Ảnh được lưu cùng ghi chú công việc</small></div><label class="image-upload-button" for="taskNoteImages">＋ Thêm ảnh</label><input id="taskNoteImages" type="file" accept="image/*" multiple hidden></div><div id="taskImageGrid" class="task-image-grid"></div><p id="taskImageStatus" class="task-image-status" role="status"></p></section><div class="actions"><button type="button" data-close>Đóng</button><button type="submit" class="primary">Lưu ghi chú</button></div></form>
+  </dialog>
+
+  <dialog id="noteDlg" class="new-note-dialog">
+    <div class="dlg-head"><h2 id="noteDlgTitle">Ghi chú mới</h2><button type="button" class="x" data-close aria-label="Đóng">&times;</button></div>
+    <form id="noteForm" class="simple-form note-form"><label>Tiêu đề<input id="noteTitle" name="title" required maxlength="120" placeholder="Một điều đáng nhớ"></label><div class="note-form-row"><label>Chủ đề<input id="noteTag" name="tag" maxlength="32" placeholder="Ví dụ: Ý tưởng"></label><label>Màu giấy<select id="noteColor" name="color"><option value="sage">Xanh lá</option><option value="peach">Đào</option><option value="blue">Xanh trời</option><option value="lilac">Tím nhạt</option><option value="yellow">Vàng</option></select></label></div><label>Nội dung<textarea id="noteContent" name="content" rows="9" placeholder="Viết xuống những điều bạn muốn lưu lại..."></textarea></label><section class="note-image-editor"><div class="note-image-toolbar"><strong>Ảnh đính kèm</strong><label class="note-image-add" for="noteImages">＋ Ảnh</label><input id="noteImages" type="file" accept="image/*" multiple hidden></div><div id="noteImageGrid" class="note-image-grid"></div><p id="noteImageStatus" class="task-image-status" role="status"></p></section><label class="note-pin-check"><input id="notePinned" name="pinned" type="checkbox"> Ghim lên đầu thư viện</label><div class="actions"><button type="button" data-close>Hủy</button><button type="submit" class="primary">Lưu ghi chú</button></div></form>
+  </dialog>
+
+  <dialog id="dlg">
+    <div class="dlg-head">
+  <h2 id="dlgTitle">Thêm công việc</h2>
+  <button type="button" class="x" data-close aria-label="Đóng">&times;</button>
+</div>
+    <form id="form">
+      <div class="grid">
+        <div class="short-fields">
+          <label class="check process-field"><input name="quiTrinh" type="checkbox"> Đã có quy trình</label>
+          <label>STT <input name="stt" type="number" min="1"></label>
+          <label>Mã BV <input name="maBV" placeholder="VD: CR14"></label>
+          <label>Trạng thái <select name="status"></select></label>
+          <label>Phụ trách <select name="phuTrach"></select></label>
+          <div class="date-field">
+            <label for="ngayHop">Ngày họp</label>
+            <span class="date-entry">
+              <input id="ngayHop" name="ngayHop" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/yyyy" autocomplete="off">
+              <button type="button" class="date-picker-button" data-open-picker="ngayHop" title="Chọn ngày họp" aria-label="Chọn ngày họp"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18"></path></svg></button>
+              <input type="date" class="native-date-picker" data-date-picker="ngayHop" tabindex="-1" aria-hidden="true">
+            </span>
+          </div>
+          <div class="date-field">
+            <label for="deadline">Deadline</label>
+            <span class="date-entry">
+              <input id="deadline" name="deadline" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/yyyy" autocomplete="off">
+              <button type="button" class="date-picker-button" data-open-picker="deadline" title="Chọn deadline" aria-label="Chọn deadline"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18"></path></svg></button>
+              <input type="date" class="native-date-picker" data-date-picker="deadline" tabindex="-1" aria-hidden="true">
+            </span>
+          </div>
+        </div>
+        <div class="main-fields">
+          <fieldset>
+            <legend>Đầu mối</legend>
+            <div id="dauMoiBoxes" class="boxes"></div>
+          </fieldset>
+
+          <label>Thuộc nội dung cha <select name="parentId"></select></label>
+
+          <label>Log yêu cầu (link) <input name="logYC" type="url" placeholder="https://"></label>
+          <label>Biên bản làm rõ (link) <input name="bienBan" type="url" placeholder="https://"></label>
+
+          <div class="writing-pair">
+            <label class="writing-field">Nội dung theo dõi
+              <textarea name="noiDung" rows="8" required></textarea>
+            </label>
+            <label class="writing-field">Ghi chú
+              <textarea name="ghiChu" rows="8"></textarea>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="submit" class="primary">Lưu</button>
+      </div>
+    </form>
+  </dialog>
+<dialog id="mgr">
+  <div class="dlg-head">
+    <h2>Quản lý danh mục</h2>
+    <button type="button" class="x" data-close aria-label="Đóng">&times;</button>
+  </div>
+  <div class="dlg-body">
+    <div class="mgr-tabs" aria-label="Phân loại danh mục">
+      <button type="button" class="mgr-tab active" data-mgr-tab="dauMoi" aria-selected="true">Đầu Mối</button>
+      <button type="button" class="mgr-tab" data-mgr-tab="trangThai" aria-selected="false">Trạng Thái</button>
+      <button type="button" class="mgr-tab" data-mgr-tab="phuTrach" aria-selected="false">Người Phụ Trách</button>
+    </div>
+    <div id="mgrBody"></div>
+    <div class="actions">
+      <button type="button" id="btnMgrClose" class="primary">Đóng</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="importDlg">
+  <div class="dlg-head">
+    <h2>Nhập công việc từ Excel</h2>
+    <button type="button" class="x" data-close aria-label="Đóng">&times;</button>
+  </div>
+  <div class="dlg-body import-body">
+    <p id="importFileName" class="import-file-name"></p>
+    <p id="importStatus" class="import-status" role="status"></p>
+    <div id="importPreview" hidden>
+      <fieldset class="import-mode">
+        <legend>Cách nhập</legend>
+        <label><input type="radio" name="importMode" value="append" checked> Thêm vào danh sách hiện tại</label>
+        <label><input type="radio" name="importMode" value="replace"> Thay thế toàn bộ danh sách</label>
+      </fieldset>
+      <p id="importSummary" class="import-summary"></p>
+      <div class="import-preview-wrap">
+        <table class="import-preview-table">
+          <thead><tr><th>STT</th><th>Mã BV</th><th>Nội dung theo dõi</th><th>Deadline</th><th>Trạng thái</th></tr></thead>
+          <tbody id="importPreviewRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" id="btnImportCancel">Hủy</button>
+      <button type="button" id="btnImportCommit" class="primary" disabled>Nhập công việc</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="childPickDlg">
+  <div class="dlg-head">
+    <h2>Gán nội dung có sẵn làm nội dung con</h2>
+    <button type="button" class="x" data-close aria-label="Đóng">&times;</button>
+  </div>
+  <div class="dlg-body child-pick-body">
+    <p id="childPickParent" class="child-pick-parent"></p>
+    <input id="childPickSearch" type="search" placeholder="Tìm theo STT, Mã BV hoặc nội dung">
+    <p id="childPickSummary" class="hint"></p>
+    <div id="childPickList" class="child-pick-list"></div>
+    <div class="actions">
+      <button type="button" id="btnChildPickCancel">Hủy</button>
+      <button type="button" id="btnChildPickSave" class="primary">Lưu quan hệ</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="cf">
+  <div class="dlg-head"><h2>Xác nhận</h2></div>
+  <div class="dlg-body">
+    <p id="cfMsg"></p>
+    <div class="actions">
+      <button type="button" id="cfNo">Không</button>
+      <button type="button" id="cfYes" class="primary">Có</button>
+    </div>
+  </div>
+</dialog>
+
+  <script src="script.js"></script>
+</body>
+</html>
