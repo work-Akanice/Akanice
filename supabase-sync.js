@@ -415,6 +415,7 @@
     let { data: { session } } = await sb.auth.getSession();
     if (!session) session = await showLogin();
     user = session.user;
+    window.SYNC_USER = String(user.email || "").split("@")[0];
     try {
       const { data: member, error } = await sb.from(T_MEMBERS).select("user_id").eq("user_id", user.id).maybeSingle();
       if (error) throw error;

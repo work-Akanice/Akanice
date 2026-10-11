@@ -364,18 +364,97 @@ function render() {
   });
 }
 
+const wf = { f: "all", p: 1, q: "", nq: "" };
+const WF_COLORS = { sage: "#6f9c6b", peach: "#f08a4b", yellow: "#e0a826", blue: "#4a82d6", lilac: "#8a63c9" };
+const isoAdd = (iso, n) => { const [y, m, d] = iso.split("-").map(Number), t = new Date(y, m - 1, d + n); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
+const weekStart = (iso) => { const [y, m, d] = iso.split("-").map(Number); return isoAdd(iso, -((new Date(y, m - 1, d).getDay() + 6) % 7)); };
+const dayLabel = (d) => !d ? "Chưa đặt" : d === today() ? "Hôm nay" : d === isoAdd(today(), 1) ? "Ngày mai" : formatLocalDate(d);
+const lc = (v) => String(v ?? "").toLocaleLowerCase("vi");
+
 function renderHome() {
-  const totalLate = tasks.filter(isLate).length;
-  $("homeSnapshot").textContent = `${tasks.length} nhiệm vụ · ${totalLate} cần chú ý`;
-  $("portalBoardCount").textContent = `${tasks.length} CÔNG VIỆC`;
-  $("portalListCount").textContent = `${personalTasks.filter((task) => !task.done).length} ĐANG MỞ`;
-  $("portalNotesCount").textContent = `${notes.length} GHI CHÚ`;
+  // số liệu yêu cầu (Bảng công việc)
+  const ws = weekStart(today()), we = isoAdd(ws, 6), ns = isoAdd(ws, 7), ne = isoAdd(ws, 13);
+  const open = tasks.filter((t) => !DA_XONG.includes(t.status));
+  const inRange = (t, a, b) => t.deadline && t.deadline >= a && t.deadline <= b;
+  const late = tasks.filter(isLate).length;
+  [["wfTotal", tasks.length], ["wfLate", late], ["wfWeek", open.filter((t) => inRange(t, ws, we)).length], ["wfNext", open.filter((t) => inRange(t, ns, ne)).length], ["wfDone", tasks.length - open.length]]
+    .forEach(([id, v]) => { $(id).textContent = v; });
+  // từ ver2: số đếm trên 3 lối vào + dòng tóm tắt
+  const openPersonal = personalTasks.filter((t) => !t.done).length;
+  const setCount = (id, n, label) => { const el = $(id); if (!el) return; el.textContent = n; el.title = `${n} ${label}`; };
+  setCount("portalBoardCount", tasks.length, "công việc");
+  setCount("portalListCount", openPersonal, "đang mở");
+  setCount("portalNotesCount", notes.length, "ghi chú");
+  if ($("homeSnapshot")) $("homeSnapshot").textContent = `${tasks.length} nhiệm vụ · ${late} cần chú ý`;
+  const alerts = late + personalTasks.filter(listIsLate).length;
+  $("wfBadge").hidden = !alerts; $("wfBadge").textContent = alerts;
+
+  // Todo list (công việc cá nhân)
+  const q = lc(wf.q);
+  const rows = personalTasks.filter((i) => (wf.f === "all" || (wf.f === "open" && !i.done) || (wf.f === "late" && listIsLate(i)) || (wf.f === "done" && i.done)) && (!q || lc(i.title).includes(q)))
+    .sort((a, b) => Number(a.done) - Number(b.done) || (a.deadline || "9999").localeCompare(b.deadline || "9999"));
+  const pages = Math.max(1, Math.ceil(rows.length / 8));
+  wf.p = Math.min(wf.p, pages);
+  const from = (wf.p - 1) * 8, show = rows.slice(from, from + 8);
+  $("wfRows").innerHTML = show.map((i) => {
+    const [label, cls] = i.done ? ["Đã hoàn thành", "ok"] : listIsLate(i) ? ["Quá hạn", "late"] : ["Chưa hoàn thành", "todo"];
+    return `<tr class="${i.done ? "is-done" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button></td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-dots" data-wf-edit="${esc(i.id)}" aria-label="Sửa công việc">⋯</button></td></tr>`;
+  }).join("");
+  $("wfEmpty").hidden = rows.length > 0;
+  $("wfInfo").textContent = rows.length ? `Hiển thị ${from + 1} - ${from + show.length} trong ${rows.length} công việc` : "";
+  const nums = []; for (let n = Math.max(1, wf.p - 2); n <= Math.min(pages, wf.p + 2); n++) nums.push(n);
+  $("wfPager").innerHTML = pages < 2 ? "" : `<button type="button" data-wf-page="${Math.max(1, wf.p - 1)}" aria-label="Trang trước">‹</button>${nums.map((n) => `<button type="button" data-wf-page="${n}" ${n === wf.p ? 'class="on" aria-current="page"' : ""}>${n}</button>`).join("")}<button type="button" data-wf-page="${Math.min(pages, wf.p + 1)}" aria-label="Trang sau">›</button>`;
+  document.querySelectorAll("[data-wf-filter]").forEach((b) => b.classList.toggle("on", b.dataset.wfFilter === wf.f));
+
+  // Ghi chú
+  const list = notes.filter((n) => [wf.q, wf.nq].every((s) => !s || lc(`${n.title} ${n.content}`).includes(lc(s))))
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, 6);
+  $("wfNotes").innerHTML = list.map((n) => `<button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button>`).join("");
+  $("wfNotesEmpty").hidden = list.length > 0;
 }
+
+(() => {
+  const home = $("homeScreen");
+  const name = window.SYNC_USER || "Tài khoản";
+  $("wfUserName").textContent = name; $("wfAvatar").textContent = name.charAt(0).toUpperCase();
+  home.addEventListener("click", (e) => {
+    const hit = (sel) => e.target.closest(sel);
+    if (!hit("#wfUser")) $("wfMenu").hidden = true;
+    if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; wf.p = 1; renderHome(); }
+    else if (hit("[data-wf-page]")) { wf.p = Number(hit("[data-wf-page]").dataset.wfPage); renderHome(); }
+    else if (hit("[data-wf-edit]")) openTaskNote(hit("[data-wf-edit]").dataset.wfEdit);
+    else if (hit("[data-wf-note]")) openNote(hit("[data-wf-note]").dataset.wfNote);
+    else if (hit("#wfAddNote")) openNote();
+    else if (hit("#wfAddTask")) { $("wfQuick").hidden = false; $("wfQuickTitle").focus(); }
+    else if (hit("#wfUser")) $("wfMenu").hidden = !$("wfMenu").hidden;
+    else if (hit("#wfLogout")) [...document.querySelectorAll(".top button")].find((b) => b.textContent.trim() === "Đăng xuất")?.click();
+  });
+  home.addEventListener("change", (e) => {
+    const box = e.target.closest("[data-wf-toggle]");
+    const item = box && personalTasks.find((t) => String(t.id) === box.dataset.wfToggle);
+    if (!item) return;
+    item.done = box.checked; savePersonalTasks(); renderHome();
+  });
+  $("wfSearch").addEventListener("input", (e) => { wf.q = e.target.value.trim(); wf.p = 1; renderHome(); });
+  $("wfNoteSearch").addEventListener("input", (e) => { wf.nq = e.target.value.trim(); renderHome(); });
+  $("wfQuick").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const title = $("wfQuickTitle").value.trim(); if (!title) return;
+    const item = { id: makeLocalId(), title, deadline: "", done: false, createdAt: today(), noteText: "", images: [] };
+    personalTasks.push(item); savePersonalTasks();
+    $("wfQuickTitle").value = ""; $("wfQuick").hidden = true; wf.f = "all"; wf.p = 1;
+    renderHome(); openTaskNote(item.id); // mở hộp thoại để đặt hạn / ghi chú
+  });
+  $("wfBack").addEventListener("click", () => showHome());
+  // sửa việc/ghi chú từ hộp thoại thì trang chủ tự cập nhật
+  const hook = (fn) => function () { const r = fn.apply(this, arguments); renderHome(); return r; };
+  renderPersonalTasks = hook(renderPersonalTasks); renderNotes = hook(renderNotes);
+})();
 
 function showAppView(view, { pushHistory = true } = {}) {
   if (!["board", "list", "notes"].includes(view)) return;
   if (pushHistory && history.state?.appView !== view) history.pushState({ appView: view }, "", `#${view}`);
-  $("homeScreen").hidden = true;
+  $("homeScreen").hidden = true; $("wfBack").hidden = false;
   $("workspaceScreen").hidden = view !== "board";
   $("listScreen").hidden = view !== "list";
   $("notesScreen").hidden = view !== "notes";
@@ -385,7 +464,7 @@ function showAppView(view, { pushHistory = true } = {}) {
 }
 function showHome({ pushHistory = true } = {}) {
   if (pushHistory && history.state?.appView !== "home") history.pushState({ appView: "home" }, "", "#home");
-  $("homeScreen").hidden = false;
+  $("homeScreen").hidden = false; $("wfBack").hidden = true;
   $("workspaceScreen").hidden = true;
   $("listScreen").hidden = true;
   $("notesScreen").hidden = true;
