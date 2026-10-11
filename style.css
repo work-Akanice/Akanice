@@ -1192,3 +1192,51 @@ th:nth-child(13) { min-width: 140px; } /* Nút quan hệ/Sửa/Xóa */
 .wf-home .wf-snapshot { margin-top: auto; padding: 10px 10px 0; color: #fff0df; font-size: 11px; font-weight: 700; letter-spacing: .4px; text-shadow: 0 1px 4px rgba(0,0,0,.55); }
 .wf-home .wf-snapshot + .wf-quote { margin-top: 0; }
 @media (max-width: 900px) { .wf-home .wf-nav button .wf-count, .wf-home .wf-snapshot { display: none; } }
+
+/* ===== Thẻ "Danh sách yêu cầu": nút ở góc phải tiêu đề, ô màu nhạt, bỏ vạch ngang ===== */
+.wf-home .wf-stats { background: rgba(255,253,249,.94); }
+.wf-home .wf-stats:before { display: none; content: none; } /* gây vạch ngang giữa thẻ */
+.wf-home .wf-stats-head { align-items: center; }
+.wf-home .wf-stats-head .wf-all { margin-left: auto; flex: none; }
+.wf-home .wf-stats-grid { gap: 14px; }
+@media (min-width: 1201px) { .wf-home .wf-stats-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.wf-home .wf-stat { margin-right: 0; min-height: 72px; padding: 10px 16px; gap: 14px; border: 0; }
+.wf-home .wf-stat:first-child { padding-left: 16px; background: #f4ede6; }
+.wf-home .wf-stat:first-child small { color: #7a5a45; }
+.wf-home .wf-stat:first-child strong { color: #6a4a2f; }
+.wf-home .wf-stat:first-child .i { background: #eadccf; color: #6a4a3a; }
+.wf-home .wf-stat.s-red    { background: #fbebe8; }
+.wf-home .wf-stat.s-blue   { background: #e9eff9; }
+.wf-home .wf-stat.s-violet { background: #f1e9f6; }
+.wf-home .wf-stat.s-green  { background: #e9f3ea; }
+.wf-home .wf-stat.s-red small    { color: #d93025; }
+.wf-home .wf-stat.s-blue small   { color: #2f6fd6; }
+.wf-home .wf-stat.s-violet small { color: #6a47b0; }
+.wf-home .wf-stat.s-green small  { color: #2f8a4f; }
+.wf-home .wf-stat small { font-size: 12px; font-weight: 500; }
+.wf-home .wf-stat strong { font-size: 26px; font-weight: 700; }
+.wf-home .wf-stat.s-red .i    { background: #fbd5d0; }
+.wf-home .wf-stat.s-blue .i   { background: #d6e4fa; }
+.wf-home .wf-stat.s-violet .i { background: #e4d8f3; }
+.wf-home .wf-stat.s-green .i  { background: #d3ead6; }
+@media (max-width: 560px) { .wf-home .wf-stats-head { flex-wrap: wrap; } .wf-home .wf-stats-head .wf-all { margin-left: 0; } }
+
+/* ===== Todo list: nút xóa | Ghi chú: thanh tìm kiếm + nút Thêm cùng một hàng, cuộn hết danh sách ===== */
+.wf-home .wf-table .w-more { width: 78px; white-space: nowrap; text-align: right; }
+.wf-home .wf-trash { margin-left: 2px; padding: 4px 5px; border: 0; border-radius: 6px; background: none; color: #9a8678; cursor: pointer; vertical-align: middle; }
+.wf-home .wf-trash:hover { color: #d93025; background: #fdecea; }
+.wf-home .wf-note-tools { display: flex; align-items: center; gap: 10px; margin: 14px 0 12px; }
+.wf-home .wf-note-tools .wf-search { flex: 1 1 auto; min-width: 0; max-width: none; margin: 0; }
+.wf-home .wf-note-tools .wf-add { flex: none; }
+.wf-home .wf-notes { max-height: 460px; scrollbar-gutter: stable; }
+
+/* ===== Sửa bảng Todo: chặn CSS của bảng công việc chính (min-width cột, cột dính, viền) rò sang ===== */
+.wf-home .wf-table table { min-width: 0; width: 100%; table-layout: auto; }
+.wf-home .wf-table th,
+.wf-home .wf-table td { position: static; left: auto; z-index: auto; min-width: 0; box-shadow: none; border: 0; border-bottom: 1px solid #eee6de; text-align: left; vertical-align: middle; }
+.wf-home .wf-table td { background: transparent; }
+.wf-home .wf-table .w-chk { width: 34px; }
+.wf-home .wf-table .w-more { width: 78px; text-align: right; white-space: nowrap; }
+.wf-home .wf-table td:nth-child(2) { width: 100%; }
+.wf-home .wf-table td:nth-child(2) .wf-link { text-align: left; }
+.wf-home .wf-table td:nth-child(3), .wf-home .wf-table td:nth-child(4) { white-space: nowrap; }

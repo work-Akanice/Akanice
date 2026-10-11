@@ -398,7 +398,7 @@ function renderHome() {
   const from = (wf.p - 1) * 8, show = rows.slice(from, from + 8);
   $("wfRows").innerHTML = show.map((i) => {
     const [label, cls] = i.done ? ["Đã hoàn thành", "ok"] : listIsLate(i) ? ["Quá hạn", "late"] : ["Chưa hoàn thành", "todo"];
-    return `<tr class="${i.done ? "is-done" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button></td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-dots" data-wf-edit="${esc(i.id)}" aria-label="Sửa công việc">⋯</button></td></tr>`;
+    return `<tr class="${i.done ? "is-done" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button></td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-dots" data-wf-edit="${esc(i.id)}" aria-label="Sửa công việc">⋯</button><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
   }).join("");
   $("wfEmpty").hidden = rows.length > 0;
   $("wfInfo").textContent = rows.length ? `Hiển thị ${from + 1} - ${from + show.length} trong ${rows.length} công việc` : "";
@@ -408,13 +408,20 @@ function renderHome() {
 
   // Ghi chú
   const list = notes.filter((n) => [wf.q, wf.nq].every((s) => !s || lc(`${n.title} ${n.content}`).includes(lc(s))))
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, 6);
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   $("wfNotes").innerHTML = list.map((n) => `<button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button>`).join("");
   $("wfNotesEmpty").hidden = list.length > 0;
 }
 
 (() => {
   const home = $("homeScreen");
+  const wfDeleteTask = async (id) => {
+    const item = personalTasks.find((t) => String(t.id) === String(id));
+    if (!item) return;
+    if (!(await askYesNo(`Xóa công việc "${item.title}"?`))) return;
+    personalTasks = personalTasks.filter((t) => String(t.id) !== String(id));
+    savePersonalTasks(); renderPersonalTasks(); renderHome();
+  };
   const name = window.SYNC_USER || "Tài khoản";
   $("wfUserName").textContent = name; $("wfAvatar").textContent = name.charAt(0).toUpperCase();
   home.addEventListener("click", (e) => {
@@ -422,6 +429,7 @@ function renderHome() {
     if (!hit("#wfUser")) $("wfMenu").hidden = true;
     if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; wf.p = 1; renderHome(); }
     else if (hit("[data-wf-page]")) { wf.p = Number(hit("[data-wf-page]").dataset.wfPage); renderHome(); }
+    else if (hit("[data-wf-del]")) wfDeleteTask(hit("[data-wf-del]").dataset.wfDel);
     else if (hit("[data-wf-edit]")) openTaskNote(hit("[data-wf-edit]").dataset.wfEdit);
     else if (hit("[data-wf-note]")) openNote(hit("[data-wf-note]").dataset.wfNote);
     else if (hit("#wfAddNote")) openNote();

@@ -40,10 +40,9 @@
         <span class="wf-hero-sun" aria-hidden="true">☀</span>
       </section>
       <section class="wf-stats" aria-label="Tổng quan yêu cầu">
-        <div class="wf-stats-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg></span><div><h2>Danh sách yêu cầu</h2><p>Tổng quan tình hình các yêu cầu hiện tại</p></div></div>
-        <div class="wf-stats-grid">
+<div class="wf-stats-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg></span><div><h2>Danh sách yêu cầu</h2><p>Tổng quan tình hình các yêu cầu hiện tại</p></div><button type="button" class="wf-all" data-open-view="board">Xem tất cả <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button></div>        
+<div class="wf-stats-grid">
           <div class="wf-stat "><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg><div><small>Tổng số yêu cầu</small><strong id="wfTotal">0</strong></div></div><div class="wf-stat s-red"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div><small>Quá hạn</small><strong id="wfLate">0</strong></div></div><div class="wf-stat s-blue"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Tuần này</small><strong id="wfWeek">0</strong></div></div><div class="wf-stat s-violet"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Tuần tới</small><strong id="wfNext">0</strong></div></div><div class="wf-stat s-green"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><div><small>Đã hoàn thành</small><strong id="wfDone">0</strong></div></div>
-          <button type="button" class="wf-all" data-open-view="board">Xem tất cả <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
         </div>
       </section>
       <div class="wf-cols">
@@ -55,9 +54,9 @@
           <p id="wfEmpty" class="wf-empty" hidden>Chưa có công việc nào phù hợp.</p>
           <div class="wf-foot"><span id="wfInfo"></span><div id="wfPager" class="wf-pager"></div></div>
         </section>
-        <section class="wf-card" aria-label="Ghi chú">
-          <div class="wf-card-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg></span><div><h2>Ghi chú</h2><p>Lưu lại những điều quan trọng</p></div><button type="button" id="wfAddNote" class="wf-add"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> Thêm ghi chú</button></div>
-          <label class="wf-search wf-s2"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input id="wfNoteSearch" type="search" placeholder="Tìm kiếm ghi chú…" aria-label="Tìm ghi chú"></label>
+                <section class="wf-card" aria-label="Ghi chú">
+          <div class="wf-card-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg></span><div><h2>Ghi chú</h2><p>Lưu lại những điều quan trọng</p></div></div>
+          <div class="wf-note-tools"><label class="wf-search wf-s2"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input id="wfNoteSearch" type="search" placeholder="Tìm kiếm ghi chú…" aria-label="Tìm ghi chú"></label><button type="button" id="wfAddNote" class="wf-add"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> Thêm ghi chú</button></div>
           <div id="wfNotes" class="wf-notes"></div>
           <p id="wfNotesEmpty" class="wf-empty" hidden>Chưa có ghi chú nào.</p>
           <button type="button" class="wf-link wf-more-notes" data-open-view="notes">Mở thư viện ghi chú <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
