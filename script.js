@@ -335,9 +335,9 @@ function render() {
     const groupChildrenCount = visibleChildren.get(String(t.id))?.length || 0;
     const isCollapsed = collapsedGroups.has(String(t.id));
     return `
-    <tr class="${rowClass}">
+    <tr class="${rowClass}" data-task-id="${esc(t.id)}">
       <td class="c">${esc(t.stt)}</td>
-      <td>${t.dauMoi.map((d) => tag(d, DAU_MOI[d] || "grey")).join("")}</td>
+      <td${EDIT_ATTRS("dauMoi")}>${t.dauMoi.map((d) => tag(d, DAU_MOI[d] || "grey")).join("")}</td>
       <td class="c">${esc(t.maBV)}</td>
       <td class="nd" title="${esc(t.noiDung)}"><span class="tree-cell">${parent
         ? '<span class="tree-branch" aria-hidden="true"></span>'
@@ -346,10 +346,10 @@ function render() {
           : '<span class="tree-spacer" aria-hidden="true"></span>'}<span class="tree-content">${relation ? `${relation} ` : ""}<span class="nd-text">${esc(t.noiDung)}</span></span></span></td>
       <td class="nd" title="${esc(t.ghiChu)}"><span class="nd-text">${esc(t.ghiChu)}</span></td>
       <td class="c"><input type="checkbox" class="qt" data-qt="${esc(t.id)}" ${t.quiTrinh ? "checked" : ""} aria-label="Qui trình"></td>
-      <td class="c">${fmt(t.ngayHop)}</td>
-      <td class="c">${fmt(t.deadline)}</td>
-      <td>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
-      <td>${t.phuTrach ? tag(t.phuTrach, "person") : ""}</td>
+      <td class="c cell-editable"${EDIT_ATTRS("ngayHop", true)}>${fmt(t.ngayHop)}</td>
+      <td class="c cell-editable"${EDIT_ATTRS("deadline", true)}>${fmt(t.deadline)}</td>
+      <td${EDIT_ATTRS("status")}>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
+      <td${EDIT_ATTRS("phuTrach")}>${t.phuTrach ? tag(t.phuTrach, "person") : ""}</td>
       <td class="c">${link(t.logYC)}</td>
       <td class="c">${link(t.bienBan)}</td>
       <td class="row-actions">
@@ -704,6 +704,180 @@ async function deleteNote(id) {
   saveNotes();
   renderNotes();
 }
+// ===== Ô soạn thảo ghi chú kiểu Word =====
+const NOTE_TAGS = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "S", "STRIKE", "DEL", "SPAN", "H1", "H2", "H3", "H4", "UL", "OL", "LI", "BLOCKQUOTE", "A", "SUB", "SUP", "PRE", "CODE", "TABLE", "THEAD", "TBODY", "TR", "TD", "TH", "HR"]);
+const NOTE_DROP = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "IMG", "SVG", "MATH", "LINK", "META", "TEMPLATE", "NOSCRIPT", "FORM", "INPUT", "BUTTON", "TEXTAREA", "SELECT", "VIDEO", "AUDIO", "CANVAS", "HEAD", "TITLE"]);
+const NOTE_STYLES = ["color", "background-color", "font-size", "font-weight", "font-style", "text-decoration", "text-decoration-line", "text-align", "margin-left", "margin", "padding-left"];
+const NOTE_SAFE_VALUE = /^[#\w\s.,%()+-]+$/;
+const NOTE_FONT_SIZES = { 1: "x-small", 2: "small", 3: "medium", 4: "large", 5: "x-large", 6: "xx-large", 7: "xxx-large" };
+
+// Chỉ giữ lại các thẻ/kiểu an toàn (dán từ Word, web hay lưu cũ đều đi qua đây)
+function cleanNoteHtml(html) {
+  const doc = new DOMParser().parseFromString(`<body>${html || ""}</body>`, "text/html");
+  const out = document.createElement("div");
+  const walk = (node, parent) => {
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === 3) { parent.appendChild(document.createTextNode(child.nodeValue)); return; }
+      if (child.nodeType !== 1) return;
+      const tag = child.tagName;
+      if (NOTE_DROP.has(tag)) return;
+      if (tag !== "FONT" && !NOTE_TAGS.has(tag)) { walk(child, parent); return; }   // thẻ lạ: bỏ thẻ, giữ chữ bên trong
+      const el = document.createElement(tag === "FONT" ? "span" : tag);
+      const styles = [];
+      for (const prop of NOTE_STYLES) {
+        const value = child.style.getPropertyValue(prop);
+        if (value && NOTE_SAFE_VALUE.test(value)) styles.push(`${prop}:${value}`);
+      }
+      if (tag === "FONT") {
+        const color = child.getAttribute("color"), size = child.getAttribute("size");
+        if (color && /^#?[\w]+$/.test(color)) styles.push(`color:${color}`);
+        if (size && NOTE_FONT_SIZES[size]) styles.push(`font-size:${NOTE_FONT_SIZES[size]}`);
+      }
+      if (styles.length) el.setAttribute("style", styles.join(";"));
+      if (tag === "A") {
+        const href = child.getAttribute("href") || "";
+        if (/^(https?:|mailto:)/i.test(href)) { el.setAttribute("href", href); el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); }
+      }
+      if (tag === "TD" || tag === "TH") {
+        ["colspan", "rowspan"].forEach((name) => { const v = child.getAttribute(name); if (/^\d{1,2}$/.test(v || "")) el.setAttribute(name, v); });
+      }
+      walk(child, el);
+      parent.appendChild(el);
+    });
+  };
+  walk(doc.body, out);
+  return out.innerHTML;
+}
+// Chữ thuần (dùng cho tìm kiếm và đoạn trích trên thẻ ghi chú)
+function noteHtmlToText(html) {
+  const doc = new DOMParser().parseFromString(`<body>${html || ""}</body>`, "text/html");
+  const block = /^(P|DIV|H[1-6]|LI|BLOCKQUOTE|PRE|TR|HR|UL|OL|TABLE)$/;
+  let out = "";
+  const walk = (node) => node.childNodes.forEach((child) => {
+    if (child.nodeType === 3) out += child.nodeValue;
+    else if (child.nodeType === 1) {
+      if (child.tagName === "BR") { out += "\n"; return; }
+      walk(child);
+      if (block.test(child.tagName)) out += "\n"; else if (/^(TD|TH)$/.test(child.tagName)) out += "\t";
+    }
+  });
+  walk(doc.body);
+  return out.replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+const notePlainToHtml = (text) => String(text || "").split("\n").map((line) => `<div>${line ? esc(line) : "<br>"}</div>`).join("");
+
+const noteEditor = $("noteContent");
+let noteRange = null;
+function setNoteEditor(note) {
+  noteEditor.innerHTML = note?.contentHtml ? cleanNoteHtml(note.contentHtml) : note?.content ? notePlainToHtml(note.content) : "";
+  noteRange = null;
+  try { document.execCommand("defaultParagraphSeparator", false, "div"); } catch (e) {}
+}
+// ô trống: tạo sẵn một đoạn <p> để gõ/định dạng đúng cấu trúc
+function ensureNoteBlock() {
+  if (noteEditor.innerHTML !== "") return;
+  noteEditor.innerHTML = "<div><br></div>";
+  const range = document.createRange();
+  range.setStart(noteEditor.firstChild, 0);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  noteRange = range.cloneRange();
+}
+function restoreNoteRange() {
+  const selection = window.getSelection();
+  const inside = document.activeElement === noteEditor && selection.rangeCount && noteEditor.contains(selection.anchorNode);
+  if (inside) return;                       // đang ở trong ô soạn thảo: giữ nguyên vùng chọn hiện tại
+  noteEditor.focus();
+  if (!noteRange) return;
+  selection.removeAllRanges();
+  selection.addRange(noteRange);
+}
+function noteExec(command, value = null, css = false) {
+  restoreNoteRange();
+  ensureNoteBlock();
+  try { document.execCommand("styleWithCSS", false, css); } catch (e) {}
+  const selection = window.getSelection();
+  const before = selection.rangeCount && selection.isCollapsed ? selection.getRangeAt(0).cloneRange() : null;
+  document.execCommand(command, false, value);
+  noteEditor.focus();
+  // một số trình duyệt đưa con trỏ về đầu dòng sau khi tạo danh sách/đổi kiểu đoạn: trả về đúng vị trí đang gõ
+  if (before && before.startContainer.isConnected && noteEditor.contains(before.startContainer) && selection.isCollapsed
+      && (selection.anchorNode !== before.startContainer || selection.anchorOffset !== before.startOffset)) {
+    selection.removeAllRanges();
+    selection.addRange(before);
+  }
+  updateNoteToolbar();
+}
+function updateNoteToolbar() {
+  document.querySelectorAll("#noteToolbar [data-cmd]").forEach((button) => {
+    if (["undo", "redo", "link", "removeFormat"].includes(button.dataset.cmd)) return;
+    let active = false;
+    try { active = document.queryCommandState(button.dataset.cmd); } catch (e) {}
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection();
+  if (selection.rangeCount && noteEditor.contains(selection.anchorNode)) {
+    noteRange = selection.getRangeAt(0).cloneRange();
+    updateNoteToolbar();
+  }
+});
+// bấm nút thanh công cụ không làm mất vùng đang chọn trong ô soạn thảo
+$("noteToolbar").addEventListener("mousedown", (event) => { if (event.target.closest("button")) event.preventDefault(); });
+$("noteToolbar").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-cmd]");
+  if (!button) return;
+  const command = button.dataset.cmd;
+  if (command === "link") {
+    restoreNoteRange();
+    const current = window.getSelection().anchorNode?.parentElement?.closest("a");
+    const url = window.prompt("Nhập địa chỉ liên kết (https://...). Để trống để bỏ liên kết.", current?.getAttribute("href") || "https://");
+    if (url === null) return;
+    const value = url.trim();
+    if (!value || value === "https://") return noteExec("unlink");
+    if (!/^(https?:|mailto:)/i.test(value)) return noteExec("createLink", `https://${value}`);
+    return noteExec("createLink", value);
+  }
+  noteExec(command);
+});
+$("noteBlock").addEventListener("change", (event) => { noteExec("formatBlock", `<${event.target.value}>`); event.target.value = "p"; });
+$("noteFontSize").addEventListener("change", (event) => { if (event.target.value) noteExec("fontSize", event.target.value, true); event.target.value = ""; });
+$("noteForeColor").addEventListener("input", (event) => noteExec("foreColor", event.target.value, true));
+$("noteBackColor").addEventListener("input", (event) => {
+  restoreNoteRange();
+  ensureNoteBlock();
+  try { document.execCommand("styleWithCSS", false, true); } catch (e) {}
+  if (!document.execCommand("hiliteColor", false, event.target.value)) document.execCommand("backColor", false, event.target.value);
+});
+noteEditor.addEventListener("beforeinput", ensureNoteBlock);
+noteEditor.addEventListener("input", () => { if (["<br>", "<p><br></p>", "<div><br></div>"].includes(noteEditor.innerHTML)) noteEditor.innerHTML = ""; });
+const insertNoteHtml = (html) => { restoreNoteRange(); ensureNoteBlock(); document.execCommand("insertHTML", false, cleanNoteHtml(html)); };
+noteEditor.addEventListener("paste", (event) => {
+  const files = [...(event.clipboardData?.items || [])]
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (files.length) { event.preventDefault(); addNoteImages(files); return; }
+  const html = event.clipboardData?.getData("text/html");
+  if (html) { event.preventDefault(); insertNoteHtml(html); }   // dán từ Word/web: giữ định dạng nhưng lọc mã lạ
+});
+noteEditor.addEventListener("dragover", (event) => event.preventDefault());
+noteEditor.addEventListener("drop", (event) => {
+  event.preventDefault();
+  const files = [...(event.dataTransfer?.files || [])].filter((file) => file.type.startsWith("image/"));
+  if (files.length) return addNoteImages(files);
+  const html = event.dataTransfer?.getData("text/html");
+  const text = event.dataTransfer?.getData("text/plain");
+  if (!html && !text) return;
+  const point = document.caretRangeFromPoint ? document.caretRangeFromPoint(event.clientX, event.clientY) : null;
+  if (point) { const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(point); noteRange = point.cloneRange(); }
+  insertNoteHtml(html || notePlainToHtml(text));
+});
+
 const openNote = (id = null) => {
   noteEditingId = id;
   const note = notes.find((item) => String(item.id) === String(id));
@@ -711,7 +885,7 @@ const openNote = (id = null) => {
   noteForm.reset();
   $("noteTitle").value = note?.title || "";
   $("noteTag").value = note?.tag || "";
-  $("noteContent").value = note?.content || "";
+  setNoteEditor(note);
   $("noteColor").value = note?.color || "sage";
   $("notePinned").checked = Boolean(note?.pinned);
   $("noteDlgTitle").textContent = note ? "Chỉnh sửa ghi chú" : "Ghi chú mới";
@@ -741,15 +915,6 @@ $("noteImages").addEventListener("change", async (event) => {
   await addNoteImages([...event.target.files]);
   event.target.value = "";
 });
-$("noteContent").addEventListener("paste", (event) => {
-  const files = [...(event.clipboardData?.items || [])]
-    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-    .map((item) => item.getAsFile())
-    .filter(Boolean);
-  if (!files.length) return;
-  event.preventDefault();
-  addNoteImages(files);
-});
 $("noteImageGrid").addEventListener("click", (event) => {
   const remove = event.target.closest("[data-remove-note-image]");
   if (!remove) return;
@@ -761,7 +926,9 @@ noteForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const title = $("noteTitle").value.trim() || "GHI CHÚ";
   const current = notes.find((item) => String(item.id) === String(noteEditingId));
-  const values = { title, tag: $("noteTag").value.trim(), content: $("noteContent").value.trim(), images: noteDraftImages.slice(), color: $("noteColor").value, pinned: $("notePinned").checked, updatedAt: today() };
+  const html = cleanNoteHtml(noteEditor.innerHTML);
+  const text = noteHtmlToText(html);
+  const values = { title, tag: $("noteTag").value.trim(), content: text, contentHtml: text ? html : "", images: noteDraftImages.slice(), color: $("noteColor").value, pinned: $("notePinned").checked, updatedAt: today() };
   if (current) Object.assign(current, values);
   else notes.push({ id: makeLocalId(), ...values });
   saveNotes();
@@ -988,6 +1155,99 @@ form.addEventListener("submit", (e) => {
 });
 
 $("btnAdd").onclick = () => openForm(null);
+
+// ===== Sửa trực tiếp trên lưới: Đầu mối, Ngày họp, Deadline, Trạng thái, Phụ trách =====
+function EDIT_ATTRS(field, hasClass = false) {
+  return `${hasClass ? "" : ' class="cell-editable"'} data-field="${field}" tabindex="0" title="Bấm để sửa"`;
+}
+const cellTask = (td) => tasks.find((t) => String(t.id) === td.closest("tr").dataset.taskId);
+let cellPop = null;
+
+function closeCellPop(rerender = true) {
+  if (!cellPop) return;
+  const { el, onDown, onKey } = cellPop;
+  cellPop = null;
+  document.removeEventListener("mousedown", onDown, true);
+  document.removeEventListener("keydown", onKey, true);
+  el.remove();
+  if (rerender) render();   // áp dụng lại bộ lọc/đếm sau khi tick xong
+}
+
+function openDauMoiPop(td, task) {
+  closeCellPop();
+  const names = orderedNames("dauMoi");
+  const options = [...names, ...task.dauMoi.filter((x) => !names.includes(x))];
+  const el = document.createElement("div");
+  el.className = "cell-pop";
+  el.setAttribute("role", "group");
+  el.setAttribute("aria-label", "Chọn đầu mối");
+  el.innerHTML = options.map((o) => `<label><input type="checkbox" value="${esc(o)}" ${task.dauMoi.includes(o) ? "checked" : ""}> ${tag(o, DAU_MOI[o] || "grey")}</label>`).join("")
+    + '<button type="button" class="cell-pop-done">Xong</button>';
+  document.body.appendChild(el);
+  const rect = td.getBoundingClientRect();
+  el.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - el.offsetWidth - 8))}px`;
+  const below = rect.bottom + 4;
+  el.style.top = `${below + el.offsetHeight > window.innerHeight - 8 ? Math.max(8, rect.top - el.offsetHeight - 4) : below}px`;
+  el.addEventListener("change", () => {
+    const checked = new Set([...el.querySelectorAll("input:checked")].map((i) => i.value));
+    task.dauMoi = options.filter((o) => checked.has(o));
+    td.innerHTML = task.dauMoi.map((d) => tag(d, DAU_MOI[d] || "grey")).join("");   // cập nhật ngay tại ô
+    save();
+  });
+  el.querySelector(".cell-pop-done").addEventListener("click", () => closeCellPop());
+  const onDown = (e) => { if (!el.contains(e.target)) closeCellPop(false); };   // bấm sang ô khác: không vẽ lại để cú bấm đó vẫn có tác dụng
+  const onKey = (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); closeCellPop(); } };
+  document.addEventListener("mousedown", onDown, true);
+  document.addEventListener("keydown", onKey, true);
+  cellPop = { el, onDown, onKey };
+  el.querySelector("input")?.focus();
+}
+
+function startCellEdit(td) {
+  const field = td.dataset.field, task = cellTask(td);
+  if (!field || !task || cellPop) return;
+  if (field === "dauMoi") return openDauMoiPop(td, task);
+  if (td.querySelector(".cell-edit")) return;
+  const original = td.innerHTML;
+  let el;
+  if (field === "ngayHop" || field === "deadline") {
+    el = document.createElement("input");
+    el.type = "date";
+    el.value = task[field] || "";
+  } else {
+    const names = field === "status" ? Object.keys(TRANG_THAI) : people();
+    const options = field === "status" ? names : ["", ...names];
+    if (task[field] && !options.includes(task[field])) options.push(task[field]);
+    el = document.createElement("select");
+    el.innerHTML = options.map((o) => `<option value="${esc(o)}">${o === "" ? "(Trống)" : esc(o)}</option>`).join("");
+    el.value = task[field] || "";
+  }
+  el.className = "cell-edit";
+  el.setAttribute("aria-label", field);
+  let finished = false;
+  const cancel = () => { if (finished) return; finished = true; td.innerHTML = original; };
+  el.addEventListener("change", () => {
+    if (finished) return;
+    finished = true;
+    task[field] = el.value;
+    save();
+    render();
+  });
+  el.addEventListener("blur", cancel);
+  el.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); cancel(); td.focus(); } });
+  td.innerHTML = "";
+  td.appendChild(el);
+  el.focus();
+  try { el.showPicker?.(); } catch (e) {}
+}
+
+$("rows").addEventListener("click", (e) => {
+  const td = e.target.closest("td.cell-editable");
+  if (td && !e.target.closest("a, button, .cell-edit")) startCellEdit(td);
+});
+$("rows").addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches("td.cell-editable")) { e.preventDefault(); startCellEdit(e.target); }
+});
 
 $("rows").addEventListener("click", async (e) => {
   const groupButton = e.target.closest("[data-toggle-group]");
