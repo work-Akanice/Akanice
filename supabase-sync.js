@@ -223,33 +223,90 @@
   }
 
   // ===== Dữ liệu CÁ NHÂN (riêng từng tài khoản) =====
-  async function pushPersonal(keys) {
-    const snapshot = keys.map((k) => [k, localStorage.getItem(k)]).filter(([, v]) => v !== null);
-    if (snapshot.length) {
-      const rows = snapshot.map(([key, value]) => ({ user_id: user.id, key, value, updated_at: new Date().toISOString() }));
-      const { error } = await sb.from(T_PERSONAL).upsert(rows, { onConflict: "user_id,key" });
+  // Cùng cơ chế trộn 3 bên như dữ liệu chung: nếu 2 thiết bị của cùng tài khoản sửa lệch nhau,
+  // thay đổi của cả hai được gộp theo từng việc / từng ghi chú thay vì bên sau ghi đè bên trước.
+  // Phiên bản dựa vào cột updated_at: chỉ ghi khi updated_at trên server vẫn đúng như lần đồng bộ trước.
+  const emptyBase = (txt) => { try { return Array.isArray(JSON.parse(txt)) ? "[]" : "null"; } catch (e) { return "null"; } };
+
+  async function syncPersonal(key, depth = 0, prefetched) {
+    if (depth > 4) throw new Error("Xung đột liên tục, sẽ thử lại");
+    const local = localStorage.getItem(key);
+    const m = meta[key];
+    let row = prefetched;
+    if (row === undefined || depth > 0) {
+      const { data, error } = await sb.from(T_PERSONAL).select("value,updated_at").eq("user_id", user.id).eq("key", key).maybeSingle();
       if (error) throw error;
+      row = data;
     }
-    setPending(getPending().filter((k) => {
-      const cur = localStorage.getItem(k);
-      const sent = snapshot.find(([kk]) => kk === k);
-      return !(cur === null || (sent && cur === sent[1]));
-    }));
+
+    if (!row) {                                   // server chưa có: đưa lên
+      if (local === null) return;
+      const { data, error } = await sb.from(T_PERSONAL)
+        .insert({ user_id: user.id, key, value: local, updated_at: new Date().toISOString() }).select("updated_at");
+      if (error) {
+        if (error.code === "23505") return syncPersonal(key, depth + 1);   // thiết bị khác vừa tạo trước
+        throw error;
+      }
+      meta[key] = { u: data && data[0] ? data[0].updated_at : null, base: local };
+      persistMeta();
+      return;
+    }
+
+    if (!m) {                                     // máy này chưa từng đồng bộ key này
+      if (local === null || local === row.value) {
+        if (local === null) nativeSet.call(localStorage, key, row.value);
+        meta[key] = { u: row.updated_at, base: row.value };
+        persistMeta();
+        if (local === null && appLoaded) needReload = true;
+        return;
+      }
+      // Cả máy này và server đều có dữ liệu: gộp (không bên nào bị mất), giữ bản máy này để dự phòng
+      backup(key, local);
+      const merged = mergeJson(emptyBase(local), local, row.value);
+      if (!appLoaded) nativeSet.call(localStorage, key, merged);
+      else needReload = true;
+      return pushPersonalRow(key, merged, row.updated_at, !appLoaded ? merged : null, depth);
+    }
+
+    if (row.updated_at === m.u) {                 // server không đổi kể từ lần đồng bộ trước
+      if (local === null || local === m.base) return;
+      return pushPersonalRow(key, local, row.updated_at, local, depth);
+    }
+
+    // Thiết bị khác đã sửa: trộn 3 bên
+    const mine = local === null ? m.base : local;
+    const merged = mine === m.base ? row.value : mergeJson(m.base, mine, row.value);
+    if (!appLoaded) {
+      if (merged !== local) nativeSet.call(localStorage, key, merged);
+      if (merged !== row.value) return pushPersonalRow(key, merged, row.updated_at, merged, depth);
+      meta[key] = { u: row.updated_at, base: merged };
+      persistMeta();
+      return;
+    }
+    // Đang chạy: không ghi đè localStorage (app đang giữ bản cũ trong bộ nhớ), đẩy bản trộn rồi tải lại trang
+    needReload = true;
+    if (merged !== row.value) return pushPersonalRow(key, merged, row.updated_at, null, depth);
+  }
+
+  async function pushPersonalRow(key, value, expectedU, newBase, depth) {
+    const { data, error } = await sb.from(T_PERSONAL)
+      .update({ value, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id).eq("key", key).eq("updated_at", expectedU).select("updated_at");
+    if (error) throw error;
+    if (!data || !data.length) return syncPersonal(key, depth + 1);   // thiết bị khác vừa ghi trước: trộn lại
+    if (newBase !== null) {
+      meta[key] = { u: data[0].updated_at, base: newBase };
+      persistMeta();
+    }
   }
 
   async function hydratePersonal() {
-    const { data, error } = await sb.from(T_PERSONAL).select("key,value");
+    const { data, error } = await sb.from(T_PERSONAL).select("key,value,updated_at");
     if (error) throw error;
-    const remote = new Map((data || []).filter((r) => r.key.startsWith(PREFIX) && !isShared(r.key)).map((r) => [r.key, r.value]));
-    const pending = getPending().filter((k) => !isShared(k));
-    const local = localKeys().filter((k) => !isShared(k));
-    if (remote.size === 0) {
-      if (local.length) await pushPersonal(local);
-      return;
-    }
-    for (const [k, v] of remote) if (!pending.includes(k)) nativeSet.call(localStorage, k, v);
-    const toPush = [...new Set([...pending, ...local.filter((k) => !remote.has(k))])];
-    if (toPush.length) await pushPersonal(toPush);
+    const rows = new Map((data || []).filter((r) => r.key.startsWith(PREFIX) && !isShared(r.key)).map((r) => [r.key, r]));
+    const keys = new Set([...rows.keys(), ...localKeys().filter((k) => !isShared(k))]);
+    for (const key of keys) await syncPersonal(key, 0, rows.get(key) || null);
+    setPending(getPending().filter((k) => isShared(k)));
   }
 
   // ===== Đẩy dữ liệu khi app lưu =====
@@ -269,7 +326,12 @@
         dirtyShared.delete(k);
         try { await syncShared(k); } catch (e) { dirtyShared.add(k); throw e; }
       }
-      if (personal.length) await pushPersonal(personal);
+      for (const k of personal) {
+        const before = localStorage.getItem(k);
+        await syncPersonal(k);
+        // chỉ bỏ khỏi hàng chờ nếu trong lúc đồng bộ app không lưu thêm gì
+        if (localStorage.getItem(k) === before) setPending(getPending().filter((x) => x !== k));
+      }
       setStatus(needReload ? "update" : "saved");
     } catch (e) {
       console.error("Lỗi đồng bộ Supabase:", e);
@@ -287,7 +349,7 @@
   const busy = () =>
     !!document.querySelector("dialog[open]") ||
     /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement && document.activeElement.tagName) || "") ||
-    dirtyShared.size > 0 || flushing;
+    dirtyShared.size > 0 || getPending().length > 0 || flushing;
   function scheduleReload() {
     setStatus("update");
     clearTimeout(reloadTimer);
@@ -305,6 +367,12 @@
         needReload = true;
         scheduleReload();
       }
+      if (flushing || getPending().length) return;
+      const { data: pr, error: pe } = await sb.from(T_PERSONAL).select("key,updated_at");
+      if (!pe && pr && pr.some((r) => r.key.startsWith(PREFIX) && !isShared(r.key) && meta[r.key] && meta[r.key].u !== r.updated_at)) {
+        needReload = true;
+        scheduleReload();
+      }
     } catch (e) {}
   }
   function subscribeRealtime() {
@@ -313,6 +381,9 @@
         .on("postgres_changes", { event: "*", schema: "public", table: T_SHARED }, (p) => {
           if (p && p.new && p.new.device === device) return;   // bỏ qua thay đổi do chính máy này gửi
           checkRemote();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: T_PERSONAL, filter: `user_id=eq.${user.id}` }, () => {
+          if (!flushing) checkRemote();
         })
         .subscribe();
     } catch (e) { console.warn("Không bật được cập nhật tức thời:", e); }
@@ -338,27 +409,27 @@
   function addSyncUi() {
     const top = document.querySelector(".top");
     if (!top) return;
-    const ref = document.getElementById("btnMgr");
+    const ref = document.getElementById("btnImport");
     const span = document.createElement("span");
     span.id = "syncStatus";
     span.className = "hint";
     span.onclick = () => { if (state === "update") location.reload(); };
     top.insertBefore(span, ref);
-    const out = document.createElement("button");
-    out.type = "button";
-    out.textContent = "Đăng xuất";
-    out.onclick = signOut;
-    top.insertBefore(out, ref);
     setStatus(state);
   }
 
   async function signOut() {
     await flush();
-    if ((dirtyShared.size || getPending().length) && !confirm("Còn thay đổi chưa đồng bộ lên Supabase, đăng xuất sẽ làm mất chúng. Vẫn đăng xuất?")) return;
+    if (dirtyShared.size || getPending().length) {
+      const msg = "Còn thay đổi chưa đồng bộ lên Supabase, đăng xuất sẽ làm mất chúng. Vẫn đăng xuất?";
+      const ok = window.askYesNo ? await window.askYesNo(msg) : confirm(msg);
+      if (!ok) return;
+    }
     [...localKeys(), PENDING_KEY, META_KEY, BACKUP_KEY].forEach((k) => localStorage.removeItem(k));
     await sb.auth.signOut();
     location.reload();
   }
+  window.SYNC_SIGNOUT = signOut;
 
   // ===== Hộp thoại =====
   function makeDialog(title, bodyHtml) {
@@ -430,6 +501,7 @@
     loadApp();
     addSyncUi();
     subscribeRealtime();
+    setInterval(() => { if (navigator.onLine && document.visibilityState === "visible") checkRemote(); }, 60000);
     flush();
   }
   start().catch((e) => { console.error(e); loadApp(); });

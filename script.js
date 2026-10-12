@@ -1,3 +1,5 @@
+const hasParent = (task) => task.parentId !== null && task.parentId !== undefined && task.parentId !== "";
+
 // ===== Danh mục: muốn thêm/bớt lựa chọn thì sửa ở đây =====
 let DAU_MOI = {
   "Điều dưỡng": "red", "TCKT": "yellow", "KHTH": "green", "CNTT": "dark", "Cấp cứu": "orange",
@@ -56,7 +58,7 @@ const renumberTasksByGroup = () => {
   const roots = [];
   const children = new Map();
   tasks.forEach((task) => {
-    const hasParentId = task.parentId !== null && task.parentId !== undefined && task.parentId !== "";
+    const hasParentId = hasParent(task);
     const parent = hasParentId ? byId.get(String(task.parentId)) : null;
     if (parent && String(parent.id) !== String(task.id) && (parent.parentId === null || parent.parentId === undefined || parent.parentId === "")) {
       const key = String(parent.id);
@@ -142,6 +144,8 @@ const nextColor = (map) => { const used = Object.values(map); return PALETTE.fin
 
 // ===== Tiện ích =====
 const $ = (id) => document.getElementById(id);
+// id duy nhất (không trùng khi nhiều người tạo cùng lúc)
+const makeLocalId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
 const esc = (s) => String(s ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (d) => (d ? d.split("-").reverse().join("/") : "");
 const isoToDisplayDate = (value) => {
@@ -162,7 +166,7 @@ const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOff
 const isLate = (t) => t.deadline && t.deadline < today() && !DA_XONG.includes(t.status);
 const isHexColor = (color) => /^#[\da-f]{6}$/i.test(String(color || ""));
 const tag = (text, color) => {
-  if (!isHexColor(color)) return `<span class="tag ${color}">${esc(text)}</span>`;
+  if (!isHexColor(color)) return `<span class="tag ${esc(color)}">${esc(text)}</span>`;
   const channels = color.slice(1).match(/../g).map((value) => parseInt(value, 16));
   const brightness = (channels[0] * 299 + channels[1] * 587 + channels[2] * 114) / 1000;
   const foreground = brightness > 150 ? "#26221d" : "#ffffff";
@@ -202,6 +206,7 @@ const COLS = [
 const filters = {}; // key -> { ex:Set } (list) | { text } (text) | { from, to } (date)
 let quickFilter = "";
 const collapsedGroups = new Set();
+let exportRows = []; // các dòng đang được lọc trên lưới (dùng cho nút Tải về)
 const weekRange = (offset) => {
   const [year, month, day] = today().split("-").map(Number);
   const monday = new Date(year, month - 1, day);
@@ -230,7 +235,7 @@ function passes(t) {
     const v = c.get(t);
     if (c.type === "list") {
       if (v.some((x) => !f.ex.has(x))) return true;
-      if (c.key === "maBV" && t.parentId !== null && t.parentId !== undefined && t.parentId !== "") {
+      if (c.key === "maBV" && hasParent(t)) {
         const parent = tasks.find((task) => String(task.id) === String(t.parentId));
         return !!parent && c.get(parent).some((x) => !f.ex.has(x));
       }
@@ -241,6 +246,14 @@ function passes(t) {
     return !!v && (!f.from || v >= f.from) && (!f.to || v <= f.to);
   });
 }
+
+const SVG = (inner) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const ICON_EDIT = SVG('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>');
+const ICON_DEL = SVG('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>');
+const ICON_CHILD = SVG('<path d="M4 4v16"/><path d="M4 10h8"/><path d="M12 7v12"/><path d="M16 13v5"/><path d="M13 15.5h6"/>');
+const ICON_PICK_CHILD = SVG('<path d="M9 6h11M9 12h11M9 18h6"/><path d="m3 6 1 1 2-2M3 12l1 1 2-2"/><path d="M19 14v6m-3-3h6"/>');
+const ICON_COLLAPSE = SVG('<path d="m6 9 6 6 6-6"/>');
+const ICON_EXPAND = SVG('<path d="m9 6 6 6-6 6"/>');
 
 function renderHead() {
   $("head").innerHTML = "<tr>" + COLS.map((c) => `
@@ -264,13 +277,6 @@ function syncFrozenColumns() {
 }
 
 function render() {
-  const SVG = (inner) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
-  const ICON_EDIT = SVG('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>');
-  const ICON_DEL = SVG('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>');
-  const ICON_CHILD = SVG('<path d="M4 4v16"/><path d="M4 10h8"/><path d="M12 7v12"/><path d="M16 13v5"/><path d="M13 15.5h6"/>');
-  const ICON_PICK_CHILD = SVG('<path d="M9 6h11M9 12h11M9 18h6"/><path d="m3 6 1 1 2-2M3 12l1 1 2-2"/><path d="M19 14v6m-3-3h6"/>');
-  const ICON_COLLAPSE = SVG('<path d="m6 9 6 6 6-6"/>');
-  const ICON_EXPAND = SVG('<path d="m9 6 6 6-6 6"/>');
   // bỏ các giá trị lọc không còn tồn tại (sau khi đổi tên/xóa danh mục)
   COLS.forEach((c) => {
     const f = filters[c.key];
@@ -291,9 +297,8 @@ function render() {
   const visibleChildren = new Map();
   const visibleRoots = [];
   filteredTasks.forEach((task) => {
-    const hasParent = task.parentId !== null && task.parentId !== undefined && task.parentId !== "";
-    const parentKey = hasParent ? String(task.parentId) : "";
-    if (hasParent && visibleIds.has(parentKey)) {
+    const parentKey = hasParent(task) ? String(task.parentId) : "";
+    if (parentKey && visibleIds.has(parentKey)) {
       if (!visibleChildren.has(parentKey)) visibleChildren.set(parentKey, []);
       visibleChildren.get(parentKey).push(task);
     } else visibleRoots.push(task);
@@ -303,10 +308,14 @@ function render() {
     const children = (visibleChildren.get(String(root.id)) || []).sort((a, b) => a.stt - b.stt);
     return collapsedGroups.has(String(root.id)) ? [root] : [root, ...children];
   });
+  exportRows = visibleRoots.flatMap((root) => [
+    { task: root, level: 0 },
+    ...(visibleChildren.get(String(root.id)) || []).map((task) => ({ task, level: 1 })),
+  ]);
   const childrenCount = new Map();
   const childOrdinals = new Map();
   tasks.forEach((task) => {
-    if (task.parentId !== null && task.parentId !== undefined && task.parentId !== "") {
+    if (hasParent(task)) {
       const parentKey = String(task.parentId);
       const ordinal = (childrenCount.get(parentKey) || 0) + 1;
       childrenCount.set(parentKey, ordinal);
@@ -336,7 +345,7 @@ function render() {
           ? `<button type="button" class="group-toggle" data-toggle-group="${esc(t.id)}" aria-expanded="${!isCollapsed}" title="${isCollapsed ? "Mở rộng nhóm" : "Thu gọn nhóm"}" aria-label="${isCollapsed ? "Mở rộng nhóm" : "Thu gọn nhóm"}">${isCollapsed ? ICON_EXPAND : ICON_COLLAPSE}</button>`
           : '<span class="tree-spacer" aria-hidden="true"></span>'}<span class="tree-content">${relation ? `${relation} ` : ""}<span class="nd-text">${esc(t.noiDung)}</span></span></span></td>
       <td class="nd" title="${esc(t.ghiChu)}"><span class="nd-text">${esc(t.ghiChu)}</span></td>
-      <td class="c"><input type="checkbox" class="qt" data-qt="${t.id}" ${t.quiTrinh ? "checked" : ""} aria-label="Qui trình"></td>
+      <td class="c"><input type="checkbox" class="qt" data-qt="${esc(t.id)}" ${t.quiTrinh ? "checked" : ""} aria-label="Qui trình"></td>
       <td class="c">${fmt(t.ngayHop)}</td>
       <td class="c">${fmt(t.deadline)}</td>
       <td>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
@@ -346,8 +355,8 @@ function render() {
       <td class="row-actions">
         ${!parent ? `<button type="button" class="icon-btn" data-add-child="${esc(t.id)}" title="Thêm nội dung con" aria-label="Thêm nội dung con">${ICON_CHILD}</button>` : ""}
         ${!parent ? `<button type="button" class="icon-btn" data-pick-children="${esc(t.id)}" title="Gán nội dung có sẵn" aria-label="Gán nội dung có sẵn">${ICON_PICK_CHILD}</button>` : ""}
-        <button type="button" class="icon-btn" data-edit="${t.id}" title="Sửa" aria-label="Sửa">${ICON_EDIT}</button>
-        <button type="button" class="icon-btn danger" data-del="${t.id}" title="Xóa" aria-label="Xóa">${ICON_DEL}</button>
+        <button type="button" class="icon-btn" data-edit="${esc(t.id)}" title="Sửa" aria-label="Sửa">${ICON_EDIT}</button>
+        <button type="button" class="icon-btn danger" data-del="${esc(t.id)}" title="Xóa" aria-label="Xóa">${ICON_DEL}</button>
       </td>
     </tr>`;
   }).join("");
@@ -386,13 +395,11 @@ function renderHome() {
   setCount("portalListCount", openPersonal, "đang mở");
   setCount("portalNotesCount", notes.length, "ghi chú");
   if ($("homeSnapshot")) $("homeSnapshot").textContent = `${tasks.length} nhiệm vụ · ${late} cần chú ý`;
-  const alerts = late + personalTasks.filter(listIsLate).length;
-  $("wfBadge").hidden = !alerts; $("wfBadge").textContent = alerts;
 
   // Todo list (công việc cá nhân)
   const q = lc(wf.q);
   const rows = personalTasks.filter((i) => (wf.f === "all" || (wf.f === "open" && !i.done) || (wf.f === "late" && listIsLate(i)) || (wf.f === "done" && i.done)) && (!q || lc(i.title).includes(q)))
-    .sort((a, b) => Number(a.done) - Number(b.done) || (a.deadline || "9999").localeCompare(b.deadline || "9999"));
+    .sort(listCompare);
   const pages = Math.max(1, Math.ceil(rows.length / 8));
   wf.p = Math.min(wf.p, pages);
   const from = (wf.p - 1) * 8, show = rows.slice(from, from + 8);
@@ -409,33 +416,30 @@ function renderHome() {
   // Ghi chú
   const list = notes.filter((n) => [wf.q, wf.nq].every((s) => !s || lc(`${n.title} ${n.content}`).includes(lc(s))))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  $("wfNotes").innerHTML = list.map((n) => `<button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button>`).join("");
+  $("wfNotes").innerHTML = list.map((n) => `<div class="wf-note-item"><button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button><button type="button" class="wf-note-del" data-wf-note-del="${esc(n.id)}" aria-label="Xóa ghi chú: ${esc(n.title)}" title="Xóa ghi chú">×</button></div>`).join("");
   $("wfNotesEmpty").hidden = list.length > 0;
 }
 
 (() => {
   const home = $("homeScreen");
-  const wfDeleteTask = async (id) => {
-    const item = personalTasks.find((t) => String(t.id) === String(id));
-    if (!item) return;
-    if (!(await askYesNo(`Xóa công việc "${item.title}"?`))) return;
-    personalTasks = personalTasks.filter((t) => String(t.id) !== String(id));
-    savePersonalTasks(); renderPersonalTasks(); renderHome();
-  };
   const name = window.SYNC_USER || "Tài khoản";
   $("wfUserName").textContent = name; $("wfAvatar").textContent = name.charAt(0).toUpperCase();
+  if (window.SYNC_USER) $("wfGreetingName").textContent = name;
+  const hour = new Date().getHours();
+  $("wfGreetingWord").textContent = hour < 11 ? "Chào buổi sáng" : hour < 13 ? "Chào buổi trưa" : hour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
+  $("listFooterNote").textContent = window.SYNC_USER ? "Dữ liệu được đồng bộ theo tài khoản của bạn" : "Dữ liệu được lưu trên thiết bị này";
   home.addEventListener("click", (e) => {
     const hit = (sel) => e.target.closest(sel);
     if (!hit("#wfUser")) $("wfMenu").hidden = true;
     if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; wf.p = 1; renderHome(); }
     else if (hit("[data-wf-page]")) { wf.p = Number(hit("[data-wf-page]").dataset.wfPage); renderHome(); }
-    else if (hit("[data-wf-del]")) wfDeleteTask(hit("[data-wf-del]").dataset.wfDel);
+    else if (hit("[data-wf-del]")) deletePersonalTask(hit("[data-wf-del]").dataset.wfDel);
     else if (hit("[data-wf-edit]")) openTaskNote(hit("[data-wf-edit]").dataset.wfEdit);
+    else if (hit("[data-wf-note-del]")) deleteNote(hit("[data-wf-note-del]").dataset.wfNoteDel);
     else if (hit("[data-wf-note]")) openNote(hit("[data-wf-note]").dataset.wfNote);
     else if (hit("#wfAddNote")) openNote();
-    else if (hit("#wfAddTask")) { $("wfQuick").hidden = false; $("wfQuickTitle").focus(); }
     else if (hit("#wfUser")) $("wfMenu").hidden = !$("wfMenu").hidden;
-    else if (hit("#wfLogout")) [...document.querySelectorAll(".top button")].find((b) => b.textContent.trim() === "Đăng xuất")?.click();
+    else if (hit("#wfLogout")) window.SYNC_SIGNOUT?.();
   });
   home.addEventListener("change", (e) => {
     const box = e.target.closest("[data-wf-toggle]");
@@ -450,13 +454,10 @@ function renderHome() {
     const title = $("wfQuickTitle").value.trim(); if (!title) return;
     const item = { id: makeLocalId(), title, deadline: "", done: false, createdAt: today(), noteText: "", images: [] };
     personalTasks.push(item); savePersonalTasks();
-    $("wfQuickTitle").value = ""; $("wfQuick").hidden = true; wf.f = "all"; wf.p = 1;
-    renderHome(); openTaskNote(item.id); // mở hộp thoại để đặt hạn / ghi chú
+    $("wfQuickTitle").value = ""; wf.f = "all"; wf.p = 1;
+    renderHome(); openTaskNote(item.id, true); // mở hộp thoại để đặt hạn / ghi chú, con trỏ vào ô nội dung
   });
   $("wfBack").addEventListener("click", () => showHome());
-  // sửa việc/ghi chú từ hộp thoại thì trang chủ tự cập nhật
-  const hook = (fn) => function () { const r = fn.apply(this, arguments); renderHome(); return r; };
-  renderPersonalTasks = hook(renderPersonalTasks); renderNotes = hook(renderNotes);
 })();
 
 function showAppView(view, { pushHistory = true } = {}) {
@@ -489,17 +490,31 @@ window.addEventListener("popstate", (event) => {
 });
 try { history.replaceState({ appView: "home" }, "", "#home"); } catch (error) {}
 
-const makeLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const formatLocalDate = (value) => {
   if (!value) return "—";
   const [year, month, day] = value.split("-").map(Number);
   return new Intl.DateTimeFormat("vi-VN").format(new Date(year, month - 1, day));
 };
 const listIsLate = (item) => !item.done && item.deadline && item.deadline < today();
-let listEditingId = null;
+// Thứ tự Todo: hôm nay -> sắp tới (gần nhất trước) -> chưa có hạn -> đã xong -> quá hạn (cuối cùng)
+const listRank = (item) => {
+  if (item.done) return 5;
+  if (!item.deadline) return 2;
+  const t = today();
+  return item.deadline === t ? 0 : item.deadline > t ? 1 : 4;
+};
+const listCompare = (a, b) => listRank(a) - listRank(b) || (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31");
+async function deletePersonalTask(id) {
+  const item = personalTasks.find((t) => String(t.id) === String(id));
+  if (!item) return;
+  if (!(await askYesNo(`Xóa công việc "${item.title}"?`))) return;
+  personalTasks = personalTasks.filter((t) => String(t.id) !== String(id));
+  savePersonalTasks();
+  renderPersonalTasks();
+}
 let noteEditingId = null;
 let noteFilterMode = "all";
-let noteViewMode = "grid";
+let noteViewMode = "vertical";
 let noteDraftImages = [];
 
 function renderPersonalTasks() {
@@ -513,7 +528,7 @@ function renderPersonalTasks() {
   }).sort((a, b) => {
     if (sort === "created") return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     if (sort === "title") return a.title.localeCompare(b.title, "vi");
-    return (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31") || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    return listCompare(a, b) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   });
   const taskRows = visible.map((item) => {
     const images = Array.isArray(item.images) ? item.images : [];
@@ -578,7 +593,7 @@ const renderTaskImages = () => {
   const images = Array.isArray(item?.images) ? item.images : [];
   $("taskImageGrid").innerHTML = images.map((image) => `<figure class="task-image-preview"><img src="${esc(image.src)}" alt="${esc(image.name || "Ảnh đính kèm")}"><button type="button" data-remove-task-image="${esc(image.id)}" aria-label="Xóa ảnh ${esc(image.name || "đính kèm")}" title="Xóa ảnh">×</button></figure>`).join("");
 };
-const openTaskNote = (id) => {
+const openTaskNote = (id, focusNote = false) => {
   const item = personalTasks.find((task) => String(task.id) === String(id));
   if (!item) return;
   taskNoteEditingId = item.id;
@@ -589,6 +604,7 @@ const openTaskNote = (id) => {
   $("taskImageStatus").textContent = "";
   renderTaskImages();
   taskNoteDialog.showModal();
+  if (focusNote) $("taskNoteText").focus();
 };
 $("listRows").addEventListener("submit", (event) => {
   if (event.target.id !== "inlineTaskForm") return;
@@ -599,7 +615,7 @@ $("listRows").addEventListener("submit", (event) => {
   personalTasks.push(item);
   savePersonalTasks();
   renderPersonalTasks();
-  openTaskNote(item.id);
+  openTaskNote(item.id, true);
 });
 taskNoteForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -674,15 +690,20 @@ $("listRows").addEventListener("click", (event) => {
   const edit = event.target.closest("[data-edit-list]");
   if (edit) return openTaskNote(edit.dataset.editList);
   const remove = event.target.closest("[data-delete-list]");
-  if (!remove) return;
-  personalTasks = personalTasks.filter((item) => String(item.id) !== remove.dataset.deleteList);
-  savePersonalTasks();
-  renderPersonalTasks();
+  if (remove) deletePersonalTask(remove.dataset.deleteList);
 });
 $("listSearch").addEventListener("input", renderPersonalTasks);
 $("listFilter").addEventListener("change", renderPersonalTasks);
 $("listSort").addEventListener("change", renderPersonalTasks);
 
+async function deleteNote(id) {
+  const note = notes.find((item) => String(item.id) === String(id));
+  if (!note) return;
+  if (!(await askYesNo(`Xóa ghi chú "${note.title}"?`))) return;
+  notes = notes.filter((item) => String(item.id) !== String(id));
+  saveNotes();
+  renderNotes();
+}
 const openNote = (id = null) => {
   noteEditingId = id;
   const note = notes.find((item) => String(item.id) === String(id));
@@ -697,7 +718,7 @@ const openNote = (id = null) => {
   $("noteImageStatus").textContent = "";
   renderNoteImages();
   noteDialog.showModal();
-  $("noteTitle").focus();
+  (note ? $("noteTitle") : $("noteContent")).focus();
 };
 function renderNoteImages() {
   $("noteImageGrid").innerHTML = noteDraftImages.map((image) => `<figure class="note-image-preview"><img src="${esc(image.src)}" alt="${esc(image.name || "Ảnh ghi chú")}"><button type="button" data-remove-note-image="${esc(image.id)}" aria-label="Xóa ảnh ${esc(image.name || "đính kèm")}" title="Xóa ảnh">×</button></figure>`).join("");
@@ -738,8 +759,7 @@ $("noteImageGrid").addEventListener("click", (event) => {
 });
 noteForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const title = $("noteTitle").value.trim();
-  if (!title) return;
+  const title = $("noteTitle").value.trim() || "GHI CHÚ";
   const current = notes.find((item) => String(item.id) === String(noteEditingId));
   const values = { title, tag: $("noteTag").value.trim(), content: $("noteContent").value.trim(), images: noteDraftImages.slice(), color: $("noteColor").value, pinned: $("notePinned").checked, updatedAt: today() };
   if (current) Object.assign(current, values);
@@ -759,10 +779,7 @@ $("notesGrid").addEventListener("click", (event) => {
     return renderNotes();
   }
   const remove = event.target.closest("[data-delete-note]");
-  if (!remove) return;
-  notes = notes.filter((note) => String(note.id) !== remove.dataset.deleteNote);
-  saveNotes();
-  renderNotes();
+  if (remove) deleteNote(remove.dataset.deleteNote);
 });
 $("noteSearch").addEventListener("input", renderNotes);
 $("noteTagFilter").addEventListener("change", renderNotes);
@@ -951,7 +968,7 @@ form.addEventListener("submit", (e) => {
     return;
   }
   const t = {
-    id: editingId ?? Date.now(),
+    id: editingId ?? makeLocalId(),
     stt: Number(form.stt.value) || 0,
     dauMoi: [...form.querySelectorAll('[name="dauMoi"]:checked')].map((c) => c.value),
     maBV: form.maBV.value.trim(), noiDung: form.noiDung.value.trim(), ghiChu: form.ghiChu.value.trim(),
@@ -972,7 +989,7 @@ form.addEventListener("submit", (e) => {
 
 $("btnAdd").onclick = () => openForm(null);
 
-$("rows").addEventListener("click", (e) => {
+$("rows").addEventListener("click", async (e) => {
   const groupButton = e.target.closest("[data-toggle-group]");
   if (groupButton) {
     const groupId = groupButton.dataset.toggleGroup;
@@ -992,14 +1009,14 @@ $("rows").addEventListener("click", (e) => {
     return;
   }
   const edit = e.target.dataset.edit, del = e.target.dataset.del;
-  if (edit) openForm(tasks.find((t) => t.id == edit));
-  const taskToDelete = del ? tasks.find((t) => t.id == del) : null;
-  const childCount = taskToDelete ? tasks.filter((task) => String(task.parentId) === String(taskToDelete.id)).length : 0;
+  if (edit) return openForm(tasks.find((t) => String(t.id) === edit));
+  const removed = del ? tasks.find((t) => String(t.id) === del) : null;
+  if (!removed) return;
+  const childCount = tasks.filter((task) => String(task.parentId) === String(removed.id)).length;
   const message = childCount
     ? `Xóa nội dung cha này? ${childCount} nội dung con sẽ được chuyển thành độc lập.`
     : "Xóa công việc này?";
-  if (del && confirm(message)) {
-    const removed = tasks.find((t) => t.id == del);
+  if (await askYesNo(message)) {
     tasks.forEach((task) => { if (String(task.parentId) === String(removed.id)) task.parentId = null; });
     tasks = tasks.filter((t) => t.id != del);
     const removedStt = Number(removed?.stt);
@@ -1029,7 +1046,7 @@ function openChildPicker(parentId) {
   const candidates = tasks.filter((task) => {
     if (String(task.id) === childPickParentId) return false;
     const isCurrentChild = currentChildren.has(String(task.id));
-    const hasAnotherParent = task.parentId !== null && task.parentId !== undefined && task.parentId !== "" && !isCurrentChild;
+    const hasAnotherParent = hasParent(task) && !isCurrentChild;
     if (hasAnotherParent) return false;
     return !tasks.some((child) => String(child.parentId) === String(task.id));
   }).sort((a, b) => a.stt - b.stt);
@@ -1091,8 +1108,6 @@ function renderMgr() {
 
   const attrs = (type, name, act) => `data-act="${act}" data-type="${type}" data-name="${esc(name)}"`;
   const row = (type, name, color, index) => {
-    const swatchClass = isHexColor(color) ? "" : ` ${color}`;
-    const swatchStyle = isHexColor(color) ? ` style="background:${color}"` : "";
     const pickerValue = isHexColor(color) ? color : COLOR_PICKER_VALUES[color] || "#d4e8fb";
     const colorControl = type === "phuTrach"
       ? '<span class="color-slot" aria-hidden="true"></span>'
@@ -1108,11 +1123,7 @@ function renderMgr() {
   };
 
   const currentTab = MGR_TABS.find((tab) => tab.key === activeMgrTab) || MGR_TABS[0];
-  const currentItems = currentTab.key === "dauMoi"
-    ? orderedEntries("dauMoi")
-    : currentTab.key === "trangThai"
-      ? orderedEntries("trangThai")
-      : orderedEntries("phuTrach");
+  const currentItems = orderedEntries(currentTab.key);
 
   $("mgrBody").innerHTML = `
     <section class="mgr-section">
@@ -1196,11 +1207,11 @@ function renameCat(type, old, nw) {
   }
 }
 
-function deleteCat(type, name) {
+async function deleteCat(type, name) {
   const n = countUse(type, name);
   if (type === "trangThai" && Object.keys(TRANG_THAI).length === 1) { alert("Phải còn ít nhất một trạng thái."); return; }
   if (type === "trangThai" && n) { alert(`Có ${n} công việc đang dùng trạng thái "${name}". Hãy đổi trạng thái của các việc đó trước khi xóa.`); return; }
-  if (!confirm(n ? `Có ${n} công việc đang dùng "${name}". Xóa sẽ bỏ nhãn này khỏi các việc đó. Tiếp tục?` : `Xóa "${name}"?`)) return;
+  if (!(await askYesNo(n ? `Có ${n} công việc đang dùng "${name}". Xóa sẽ bỏ nhãn này khỏi các việc đó. Tiếp tục?` : `Xóa "${name}"?`))) return;
   if (type === "dauMoi") {
     delete DAU_MOI[name];
     setCatOrder("dauMoi", orderedNames("dauMoi"));
@@ -1218,11 +1229,10 @@ function deleteCat(type, name) {
 
 function afterMgrChange() { syncCatOrder(); save(); saveCats(); renderMgr(); render(); }
 
-$("btnMgr").onclick = () => { renderMgr(); mgr.showModal(); };
 $("btnHomeMgr").onclick = () => { renderMgr(); mgr.showModal(); };
 $("btnMgrClose").onclick = () => mgr.close();
 
-$("mgrBody").addEventListener("click", (e) => {
+$("mgrBody").addEventListener("click", async (e) => {
   const { act, type, name } = e.target.dataset;
   if (act === "add") {
     const input = e.target.parentElement.querySelector("[data-new]");
@@ -1230,7 +1240,7 @@ $("mgrBody").addEventListener("click", (e) => {
     addCat(type, input.value, color);
     afterMgrChange();
   } else if (act === "del") {
-    deleteCat(type, name);
+    await deleteCat(type, name);
     afterMgrChange();
   }
 });
@@ -1316,7 +1326,7 @@ $("rows").addEventListener("change", async (e) => {
   const checked = e.target.checked;
   const ok = await askYesNo("Bạn xác định thay đổi trạng thái qui trình?");
   if (ok) {
-    tasks.find((t) => t.id == id).quiTrinh = checked;
+    tasks.find((t) => String(t.id) === id).quiTrinh = checked;
     save();
   }
   render(); // vẽ lại: nếu chọn Không thì ô tick trở về như cũ
@@ -1445,6 +1455,53 @@ function showImportPreview(fileName, sheetName, result) {
 }
 
 $("btnImport").onclick = () => $("importFile").click();
+
+// ===== Tải về Excel: xuất đúng các dòng đang lọc trên lưới (cùng cột và tiêu đề với file Nhập Excel) =====
+const EXPORT_COLS = [
+  { label: "STT", width: 6, value: (t) => t.stt },
+  { label: "Đầu mối", width: 18, value: (t) => (t.dauMoi || []).join(", ") },
+  { label: "Mã BV", width: 10, value: (t) => t.maBV || "" },
+  { label: "Nội dung theo dõi", width: 60, value: (t) => t.noiDung || "" },
+  { label: "Ghi chú", width: 40, value: (t) => t.ghiChu || "" },
+  { label: "Qui trình", width: 10, value: (t) => (t.quiTrinh ? "Có" : "Chưa") },
+  { label: "Ngày họp", width: 12, date: true, value: (t) => t.ngayHop },
+  { label: "Deadline", width: 12, date: true, value: (t) => t.deadline },
+  { label: "Trạng thái", width: 16, value: (t) => t.status || "" },
+  { label: "Phụ trách", width: 14, value: (t) => t.phuTrach || "" },
+  { label: "Log yêu cầu", width: 30, link: true, value: (t) => t.logYC || "" },
+  { label: "Biên bản làm rõ", width: 30, link: true, value: (t) => t.bienBan || "" },
+];
+const isoToExcelSerial = (iso) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  return match ? Date.UTC(+match[1], +match[2] - 1, +match[3]) / 864e5 + 25569 : "";
+};
+$("btnExport").addEventListener("click", async () => {
+  if (!exportRows.length) { alert("Không có công việc nào đang hiển thị để tải về."); return; }
+  const button = $("btnExport");
+  button.disabled = true;
+  try {
+    const XLSX = await ensureXlsx();
+    const rows = exportRows.map(({ task }) => EXPORT_COLS.map((col) => (col.date ? isoToExcelSerial(col.value(task)) : col.value(task))));
+    const ws = XLSX.utils.aoa_to_sheet([EXPORT_COLS.map((col) => col.label), ...rows]);
+    EXPORT_COLS.forEach((col, c) => {
+      rows.forEach((row, i) => {
+        const cell = ws[XLSX.utils.encode_cell({ r: i + 1, c })];
+        if (!cell) return;
+        if (col.date && typeof cell.v === "number") cell.z = "dd/mm/yyyy";
+        if (col.link && /^https?:\/\//.test(row[c])) cell.l = { Target: row[c] };
+      });
+    });
+    ws["!cols"] = EXPORT_COLS.map((col) => ({ wch: col.width }));
+    ws["!rows"] = [{}, ...exportRows.map(({ level }) => (level ? { level } : {}))]; // nội dung con thụt cấp như file nhập
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, ws, "Công việc");
+    XLSX.writeFile(workbook, `cong-viec-${today()}.xlsx`);
+  } catch (error) {
+    alert(error.message || "Không tạo được file Excel.");
+  } finally {
+    button.disabled = false;
+  }
+});
 $("importFile").addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   e.target.value = "";
@@ -1497,8 +1554,6 @@ $("btnImportCommit").addEventListener("click", () => {
     usedStts.add(stt);
     return stt;
   };
-  const existingIds = new Set((mode === "append" ? tasks : []).map((task) => String(task.id)));
-  let nextId = Date.now();
   const imported = pendingImport.records.map((record) => {
     let stt = record.stt;
     if (!Number.isSafeInteger(stt) || stt < 1 || usedStts.has(stt)) stt = allocateStt();
@@ -1506,9 +1561,7 @@ $("btnImportCommit").addEventListener("click", () => {
       usedStts.add(stt);
       availableBank = availableBank.filter((value) => value !== stt);
     }
-    while (existingIds.has(String(nextId))) nextId++;
-    const id = nextId++;
-    existingIds.add(String(id));
+    const id = makeLocalId();
     const { parentIndex, outlineLevel, ...taskFields } = record;
     return { ...taskFields, id, stt, parentId: null };
   });
