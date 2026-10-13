@@ -1,4 +1,8 @@
 const hasParent = (task) => task.parentId !== null && task.parentId !== undefined && task.parentId !== "";
+// Người phụ trách lưu dạng mảng (chọn được nhiều người). Dữ liệu cũ dạng chữ được đổi thành mảng 1 phần tử.
+const toPeople = (value) => Array.isArray(value)
+  ? [...new Set(value.map((x) => String(x ?? "").trim()).filter(Boolean))]
+  : (value && String(value).trim() ? [String(value).trim()] : []);
 
 // ===== Danh mục: muốn thêm/bớt lựa chọn thì sửa ở đây =====
 let DAU_MOI = {
@@ -9,6 +13,7 @@ let TRANG_THAI = {
 };
 let DA_XONG = ["Done"]; // trạng thái coi là đã xong (không tính trễ)
 let PHU_TRACH = [];
+let PT_MAP = {}; // người phụ trách -> [các đầu mối người đó phụ trách]
 
 // ===== Dữ liệu =====
 const KEY = "ql-cong-viec-v1";
@@ -32,6 +37,8 @@ const sample = [
 let tasks;
 try { tasks = JSON.parse(localStorage.getItem(KEY)); } catch (e) { tasks = null; }
 if (!Array.isArray(tasks)) tasks = sample;
+const normalizePeople = () => tasks.forEach((t) => { if (t && typeof t === "object") t.phuTrach = toPeople(t.phuTrach); });
+normalizePeople();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch (e) {} };
 const readStoredArray = (key) => {
   try {
@@ -44,16 +51,21 @@ let notes = readStoredArray(NOTES_KEY).filter((note) => note && typeof note.titl
 const savePersonalTasks = () => { try { localStorage.setItem(LIST_KEY, JSON.stringify(personalTasks)); } catch (e) {} };
 const saveNotes = () => { try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (e) {} };
 let sttBank = [];
-try {
-  const storedSttBank = JSON.parse(localStorage.getItem(STT_BANK_KEY));
-  if (Array.isArray(storedSttBank)) sttBank = storedSttBank.map(Number);
-} catch (e) {}
+const loadSttBank = () => {
+  try {
+    const storedSttBank = JSON.parse(localStorage.getItem(STT_BANK_KEY));
+    if (Array.isArray(storedSttBank)) sttBank = storedSttBank.map(Number);
+  } catch (e) {}
+};
+loadSttBank();
 const normalizeSttBank = () => {
   const used = new Set(tasks.map((task) => Number(task.stt)).filter(Number.isSafeInteger));
   sttBank = [...new Set(sttBank)].filter((stt) => Number.isSafeInteger(stt) && stt > 0 && !used.has(stt)).sort((a, b) => a - b);
 };
 const saveSttBank = () => { try { localStorage.setItem(STT_BANK_KEY, JSON.stringify(sttBank)); } catch (e) {} };
-const renumberTasksByGroup = () => {
+const idCompare = (a, b) => { const x = String(a.id), y = String(b.id); return x < y ? -1 : x > y ? 1 : 0; };
+// stableById = true: khi trùng STT thì xếp theo id, để mọi máy cùng cho ra đúng một kết quả (dùng khi sửa lỗi sau merge)
+const renumberTasksByGroup = (stableById = false) => {
   const byId = new Map(tasks.map((task) => [String(task.id), task]));
   const roots = [];
   const children = new Map();
@@ -69,7 +81,7 @@ const renumberTasksByGroup = () => {
       roots.push(task);
     }
   });
-  const byOldStt = (a, b) => (Number(a.stt) || 0) - (Number(b.stt) || 0);
+  const byOldStt = (a, b) => (Number(a.stt) || 0) - (Number(b.stt) || 0) || (stableById ? idCompare(a, b) : 0);
   roots.sort(byOldStt);
   tasks = roots.flatMap((root) => [root, ...(children.get(String(root.id)) || []).sort(byOldStt)]);
   tasks.forEach((task, index) => { task.stt = index + 1; });
@@ -96,27 +108,51 @@ try {
   }
 } catch (e) {}
 
+// Sau khi nhiều người cùng thêm/xóa rồi được merge, có thể phát sinh STT trùng hoặc việc con mất cha.
+// Phát hiện và đánh lại STT theo cách xác định (cùng dữ liệu => cùng kết quả trên mọi máy).
+const needsSttRepair = () => {
+  const ids = new Set(tasks.map((task) => String(task.id)));
+  const seen = new Set();
+  return tasks.some((task) => {
+    const n = Number(task.stt);
+    if (!Number.isSafeInteger(n) || n < 1 || seen.has(n)) return true;
+    seen.add(n);
+    return hasParent(task) && !ids.has(String(task.parentId));
+  });
+};
+const repairSttIfNeeded = () => {
+  if (!needsSttRepair()) return false;
+  renumberTasksByGroup(true);
+  save(); saveSttBank();
+  return true;
+};
+repairSttIfNeeded();
+
 // ===== Danh mục (tạo thêm được trong form) =====
 const CAT_KEY = "ql-cong-viec-cats-v1";
-let savedCatOrder = { dauMoi: [], trangThai: [], phuTrach: [] };
-try {
-  const c = JSON.parse(localStorage.getItem(CAT_KEY));
-  if (c) {
-    DAU_MOI = c.dauMoi || DAU_MOI;
-    TRANG_THAI = c.trangThai || TRANG_THAI;
-    DA_XONG = c.daXong || DA_XONG;
-    PHU_TRACH = c.phuTrach || [];
-    savedCatOrder = {
-      dauMoi: Array.isArray(c.order?.dauMoi) ? c.order.dauMoi : [],
-      trangThai: Array.isArray(c.order?.trangThai) ? c.order.trangThai : [],
-      phuTrach: Array.isArray(c.order?.phuTrach) ? c.order.phuTrach : [],
-    };
-  }
-} catch (e) {}
-tasks.forEach((t) => { if (t.phuTrach && !PHU_TRACH.includes(t.phuTrach)) PHU_TRACH.push(t.phuTrach); });
-const CAT_ORDER = { ...savedCatOrder };
+const CAT_ORDER = { dauMoi: [], trangThai: [], phuTrach: [] };
+const loadCats = () => {
+  try {
+    const c = JSON.parse(localStorage.getItem(CAT_KEY));
+    if (c) {
+      DAU_MOI = c.dauMoi || DAU_MOI;
+      TRANG_THAI = c.trangThai || TRANG_THAI;
+      DA_XONG = c.daXong || DA_XONG;
+      PHU_TRACH = c.phuTrach || [];
+      PT_MAP = {};
+      if (c.phuTrachMap && typeof c.phuTrachMap === "object" && !Array.isArray(c.phuTrachMap)) {
+        Object.entries(c.phuTrachMap).forEach(([person, list]) => { if (Array.isArray(list)) PT_MAP[person] = list.filter((d) => typeof d === "string"); });
+      }
+      ["dauMoi", "trangThai", "phuTrach"].forEach((type) => {
+        CAT_ORDER[type] = Array.isArray(c.order?.[type]) ? c.order[type] : [];
+      });
+    }
+  } catch (e) {}
+  tasks.forEach((t) => toPeople(t.phuTrach).forEach((p) => { if (!PHU_TRACH.includes(p)) PHU_TRACH.push(p); }));
+  syncCatOrder();
+};
 const saveCats = () => {
-  try { localStorage.setItem(CAT_KEY, JSON.stringify({ dauMoi: DAU_MOI, trangThai: TRANG_THAI, daXong: DA_XONG, phuTrach: PHU_TRACH, order: CAT_ORDER })); } catch (e) {}
+  try { localStorage.setItem(CAT_KEY, JSON.stringify({ dauMoi: DAU_MOI, trangThai: TRANG_THAI, daXong: DA_XONG, phuTrach: PHU_TRACH, phuTrachMap: PT_MAP, order: CAT_ORDER })); } catch (e) {}
 };
 const orderedNames = (type) => {
   const names = type === "dauMoi" ? Object.keys(DAU_MOI) : type === "trangThai" ? Object.keys(TRANG_THAI) : PHU_TRACH.slice();
@@ -138,7 +174,7 @@ const syncCatOrder = () => {
   setCatOrder("trangThai", orderedNames("trangThai"));
   setCatOrder("phuTrach", orderedNames("phuTrach"));
 };
-syncCatOrder();
+loadCats();
 const PALETTE = ["red", "yellow", "green", "dark", "orange", "blue", "purple"];
 const nextColor = (map) => { const used = Object.values(map); return PALETTE.find((c) => !used.includes(c)) || PALETTE[used.length % PALETTE.length]; };
 
@@ -199,7 +235,7 @@ const COLS = [
   { key: "ngayHop", label: "Ngày họp", type: "date", get: (t) => t.ngayHop || "" },
   { key: "deadline", label: "Deadline", type: "date", get: (t) => t.deadline || "" },
   { key: "status", label: "Trạng thái", type: "list", get: (t) => one(t.status) },
-  { key: "phuTrach", label: "Phụ trách", type: "list", get: (t) => one(t.phuTrach) },
+  { key: "phuTrach", label: "Phụ trách", type: "list", get: (t) => (toPeople(t.phuTrach).length ? toPeople(t.phuTrach) : ["(Trống)"]) },
   { key: "logYC", label: "Log yêu cầu", type: "list", get: (t) => [t.logYC ? "Có link" : "Chưa có"] },
   { key: "bienBan", label: "Biên bản làm rõ", type: "list", get: (t) => [t.bienBan ? "Có link" : "Chưa có"] },
 ];
@@ -290,7 +326,7 @@ function render() {
 
   const q = $("fSearch").value.trim().toLowerCase();
   const filteredTasks = tasks
-    .filter((t) => passesQuickFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, t.phuTrach].join(" ").toLowerCase().includes(q)) && passes(t))
+    .filter((t) => passesQuickFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, toPeople(t.phuTrach).join(" ")].join(" ").toLowerCase().includes(q)) && passes(t))
     .sort((a, b) => a.stt - b.stt);
   const taskById = new Map(tasks.map((task) => [String(task.id), task]));
   const visibleIds = new Set(filteredTasks.map((task) => String(task.id)));
@@ -349,7 +385,7 @@ function render() {
       <td class="c cell-editable"${EDIT_ATTRS("ngayHop", true)}>${fmt(t.ngayHop)}</td>
       <td class="c cell-editable"${EDIT_ATTRS("deadline", true)}>${fmt(t.deadline)}</td>
       <td${EDIT_ATTRS("status")}>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
-      <td${EDIT_ATTRS("phuTrach")}>${t.phuTrach ? tag(t.phuTrach, "person") : ""}</td>
+      <td${EDIT_ATTRS("phuTrach")}>${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
       <td class="c">${link(t.logYC)}</td>
       <td class="c">${link(t.bienBan)}</td>
       <td class="row-actions">
@@ -364,7 +400,9 @@ function render() {
 
   $("empty").hidden = list.length > 0;
   const late = tasks.filter(isLate).length;
-  $("count").innerHTML = `<strong class="count-total">${tasks.length}</strong><span class="count-label">công việc</span><span class="count-meta">${list.length} đang hiển thị · ${late} việc trễ</span>`;
+  const parentIds = new Set(tasks.filter(hasParent).map((task) => String(task.parentId)));
+  const shownCount = filteredTasks.filter((task) => !parentIds.has(String(task.id))).length;   // chỉ tính việc đơn lẻ + việc con
+  $("count").innerHTML = `<span class="count-label">Tổng số:</span><strong class="count-total">${shownCount}</strong>`;
   renderHome();
   document.querySelectorAll("[data-quick-filter]").forEach((button) => {
     const active = button.dataset.quickFilter === quickFilter;
@@ -379,6 +417,9 @@ const isoAdd = (iso, n) => { const [y, m, d] = iso.split("-").map(Number), t = n
 const weekStart = (iso) => { const [y, m, d] = iso.split("-").map(Number); return isoAdd(iso, -((new Date(y, m - 1, d).getDay() + 6) % 7)); };
 const dayLabel = (d) => !d ? "Chưa đặt" : d === today() ? "Hôm nay" : d === isoAdd(today(), 1) ? "Ngày mai" : formatLocalDate(d);
 const lc = (v) => String(v ?? "").toLocaleLowerCase("vi");
+
+// công việc có ghi chú chữ hoặc ảnh đính kèm
+const taskHasNote = (item) => Boolean(String(item.noteText || item.note || "").trim() || (Array.isArray(item.images) && item.images.length));
 
 function renderHome() {
   // số liệu yêu cầu (Bảng công việc)
@@ -405,7 +446,7 @@ function renderHome() {
   const from = (wf.p - 1) * 8, show = rows.slice(from, from + 8);
   $("wfRows").innerHTML = show.map((i) => {
     const [label, cls] = i.done ? ["Đã hoàn thành", "ok"] : listIsLate(i) ? ["Quá hạn", "late"] : ["Chưa hoàn thành", "todo"];
-    return `<tr class="${i.done ? "is-done" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button></td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-dots" data-wf-edit="${esc(i.id)}" aria-label="Sửa công việc">⋯</button><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
+    return `<tr class="${i.done ? "is-done" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button>${taskHasNote(i) ? '<span class="wf-note-mark" title="Có ghi chú nội dung" aria-label="Có ghi chú nội dung">✎</span>' : ""}</td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
   }).join("");
   $("wfEmpty").hidden = rows.length > 0;
   $("wfInfo").textContent = rows.length ? `Hiển thị ${from + 1} - ${from + show.length} trong ${rows.length} công việc` : "";
@@ -457,13 +498,12 @@ function renderHome() {
     $("wfQuickTitle").value = ""; wf.f = "all"; wf.p = 1;
     renderHome(); openTaskNote(item.id, true); // mở hộp thoại để đặt hạn / ghi chú, con trỏ vào ô nội dung
   });
-  $("wfBack").addEventListener("click", () => showHome());
 })();
 
 function showAppView(view, { pushHistory = true } = {}) {
   if (!["board", "list", "notes"].includes(view)) return;
   if (pushHistory && history.state?.appView !== view) history.pushState({ appView: view }, "", `#${view}`);
-  $("homeScreen").hidden = true; $("wfBack").hidden = false;
+  $("homeScreen").hidden = true;
   $("workspaceScreen").hidden = view !== "board";
   $("listScreen").hidden = view !== "list";
   $("notesScreen").hidden = view !== "notes";
@@ -473,7 +513,7 @@ function showAppView(view, { pushHistory = true } = {}) {
 }
 function showHome({ pushHistory = true } = {}) {
   if (pushHistory && history.state?.appView !== "home") history.pushState({ appView: "home" }, "", "#home");
-  $("homeScreen").hidden = false; $("wfBack").hidden = true;
+  $("homeScreen").hidden = false;
   $("workspaceScreen").hidden = true;
   $("listScreen").hidden = true;
   $("notesScreen").hidden = true;
@@ -507,7 +547,7 @@ const listCompare = (a, b) => listRank(a) - listRank(b) || (a.deadline || "9999-
 async function deletePersonalTask(id) {
   const item = personalTasks.find((t) => String(t.id) === String(id));
   if (!item) return;
-  if (!(await askYesNo(`Xóa công việc "${item.title}"?`))) return;
+  if (!(await askYesNo(`Xóa công việc "${item.title}"?`, true))) return;
   personalTasks = personalTasks.filter((t) => String(t.id) !== String(id));
   savePersonalTasks();
   renderPersonalTasks();
@@ -578,7 +618,6 @@ function renderNotes() {
     </article>`;
   }).join("");
   $("noteTotal").textContent = String(notes.length).padStart(2, "0");
-  $("notesFooterMeta").textContent = `${notes.filter((note) => note.pinned).length} ĐÃ GHIM · ${notes.length} TỔNG CỘNG`;
   $("notesEmpty").hidden = visible.length > 0;
   renderHome();
 }
@@ -658,13 +697,19 @@ $("taskNoteImages").addEventListener("change", async (event) => {
   const selected = files.slice(0, available);
   if (files.length > available) $("taskImageStatus").textContent = "Mỗi công việc có thể lưu tối đa 8 ảnh.";
   else $("taskImageStatus").textContent = selected.length ? "Đang thêm ảnh..." : "";
+  const liveItem = () => personalTasks.find((task) => String(task.id) === String(taskNoteEditingId)) || item;
   for (const file of selected) {
-    try { item.images.push({ id: makeLocalId(), name: file.name, src: await readTaskImage(file) }); }
+    try {
+      const src = await readTaskImage(file);
+      const live = liveItem();   // dữ liệu có thể vừa được cập nhật từ máy khác trong lúc xử lý ảnh
+      live.images = Array.isArray(live.images) ? live.images : [];
+      live.images.push({ id: makeLocalId(), name: file.name, src });
+    }
     catch (error) { $("taskImageStatus").textContent = `Không thể thêm ảnh ${file.name}.`; }
   }
   savePersonalTasks();
   renderTaskImages();
-  if (selected.length && item.images.length <= 8) $("taskImageStatus").textContent = `${selected.length} ảnh đã được thêm.`;
+  if (selected.length && liveItem().images.length <= 8) $("taskImageStatus").textContent = `${selected.length} ảnh đã được thêm.`;
   event.target.value = "";
 });
 $("taskImageGrid").addEventListener("click", (event) => {
@@ -699,7 +744,7 @@ $("listSort").addEventListener("change", renderPersonalTasks);
 async function deleteNote(id) {
   const note = notes.find((item) => String(item.id) === String(id));
   if (!note) return;
-  if (!(await askYesNo(`Xóa ghi chú "${note.title}"?`))) return;
+  if (!(await askYesNo(`Xóa ghi chú "${note.title}"?`, true))) return;
   notes = notes.filter((item) => String(item.id) !== String(id));
   saveNotes();
   renderNotes();
@@ -818,6 +863,13 @@ function updateNoteToolbar() {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+  // ô "Kiểu đoạn" hiển thị đúng kiểu của đoạn đang đặt con trỏ
+  const sel = window.getSelection();
+  if (sel.rangeCount && noteEditor.contains(sel.anchorNode)) {
+    let block = "";
+    try { block = String(document.queryCommandValue("formatBlock") || "").toLowerCase().replace(/[<>]/g, ""); } catch (e) {}
+    $("noteBlock").value = /^h[1-3]$/.test(block) ? block : "p";
+  }
 }
 document.addEventListener("selectionchange", () => {
   const selection = window.getSelection();
@@ -828,23 +880,84 @@ document.addEventListener("selectionchange", () => {
 });
 // bấm nút thanh công cụ không làm mất vùng đang chọn trong ô soạn thảo
 $("noteToolbar").addEventListener("mousedown", (event) => { if (event.target.closest("button")) event.preventDefault(); });
+function noteLink() {
+  restoreNoteRange();
+  const current = window.getSelection().anchorNode?.parentElement?.closest("a");
+  const url = window.prompt("Nhập địa chỉ liên kết (https://...). Để trống để bỏ liên kết.", current?.getAttribute("href") || "https://");
+  if (url === null) return;
+  const value = url.trim();
+  if (!value || value === "https://") return noteExec("unlink");
+  if (!/^(https?:|mailto:)/i.test(value)) return noteExec("createLink", `https://${value}`);
+  return noteExec("createLink", value);
+}
 $("noteToolbar").addEventListener("click", (event) => {
   const button = event.target.closest("[data-cmd]");
   if (!button) return;
-  const command = button.dataset.cmd;
-  if (command === "link") {
-    restoreNoteRange();
-    const current = window.getSelection().anchorNode?.parentElement?.closest("a");
-    const url = window.prompt("Nhập địa chỉ liên kết (https://...). Để trống để bỏ liên kết.", current?.getAttribute("href") || "https://");
-    if (url === null) return;
-    const value = url.trim();
-    if (!value || value === "https://") return noteExec("unlink");
-    if (!/^(https?:|mailto:)/i.test(value)) return noteExec("createLink", `https://${value}`);
-    return noteExec("createLink", value);
-  }
-  noteExec(command);
+  if (button.dataset.cmd === "link") return noteLink();
+  noteExec(button.dataset.cmd);
 });
-$("noteBlock").addEventListener("change", (event) => { noteExec("formatBlock", `<${event.target.value}>`); event.target.value = "p"; });
+
+// ----- Phím tắt + tự định dạng kiểu Word -----
+const noteInList = () => {
+  try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; }
+};
+const noteBlockOf = (node) => {
+  let el = node && node.nodeType === 3 ? node.parentElement : node;
+  while (el && el !== noteEditor && !/^(DIV|P|LI|H1|H2|H3|BLOCKQUOTE)$/.test(el.tagName)) el = el.parentElement;
+  return el;
+};
+noteEditor.addEventListener("keydown", (event) => {
+  if (event.isComposing) return;
+  const mod = event.ctrlKey || event.metaKey;
+  const selection = window.getSelection();
+
+  // Tab / Shift+Tab: thụt / lùi lề (trong danh sách thì xuống / lên cấp)
+  if (event.key === "Tab" && !mod && !event.altKey) {
+    const inList = noteInList();
+    const indented = !!selection.anchorNode && !!noteBlockOf(selection.anchorNode)?.closest("blockquote");
+    if (event.shiftKey) {
+      if (inList || indented) { event.preventDefault(); noteExec("outdent"); }
+      return;   // ngoài ra để Shift+Tab đưa con trỏ ra khỏi ô như bình thường
+    }
+    event.preventDefault();
+    if (inList || !selection.isCollapsed) noteExec("indent");
+    else noteExec("insertText", "\u00a0\u00a0\u00a0\u00a0");
+    return;
+  }
+
+  // Ctrl+L/E/R/J căn lề · Ctrl+Shift+L hoặc 8 gạch đầu dòng · Ctrl+Shift+7 đánh số · Ctrl+K liên kết
+  if (mod && !event.altKey) {
+    const key = /^Digit\d$/.test(event.code) ? event.code.slice(5) : event.key.toLowerCase();
+    const map = event.shiftKey
+      ? { l: "insertUnorderedList", 8: "insertUnorderedList", 7: "insertOrderedList" }
+      : { l: "justifyLeft", e: "justifyCenter", r: "justifyRight", j: "justifyFull" };
+    if (map[key]) { event.preventDefault(); noteExec(map[key]); return; }
+    if (key === "k" && !event.shiftKey) { event.preventDefault(); noteLink(); }
+    return;
+  }
+
+  // Gõ "- " / "* " / "• " hoặc "1. " ở đầu dòng rồi nhấn dấu cách: tự tạo danh sách
+  if (event.key === " " && !event.altKey && selection.rangeCount && selection.isCollapsed && selection.anchorNode?.nodeType === 3) {
+    const block = noteBlockOf(selection.anchorNode);
+    if (!block || block === noteEditor || /^(LI|H1|H2|H3)$/.test(block.tagName)) return;
+    const before = document.createRange();
+    before.setStart(block, 0);
+    before.setEnd(selection.anchorNode, selection.anchorOffset);
+    const marker = before.toString();
+    const kind = /^[-*•]$/.test(marker) ? "insertUnorderedList" : /^\d{1,3}[.)]$/.test(marker) ? "insertOrderedList" : "";
+    if (!kind) return;
+    event.preventDefault();
+    before.deleteContents();
+    if (!block.textContent && !block.querySelector("br")) block.appendChild(document.createElement("br"));
+    const caret = document.createRange();
+    caret.setStart(block, 0);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
+    noteExec(kind);
+  }
+});
+$("noteBlock").addEventListener("change", (event) => { noteExec("formatBlock", `<${event.target.value}>`); });
 $("noteFontSize").addEventListener("change", (event) => { if (event.target.value) noteExec("fontSize", event.target.value, true); event.target.value = ""; });
 $("noteForeColor").addEventListener("input", (event) => noteExec("foreColor", event.target.value, true));
 $("noteBackColor").addEventListener("input", (event) => {
@@ -1098,6 +1211,36 @@ form.addEventListener("change", (e) => {
   field.setCustomValidity("");
 });
 
+// ----- Tự điền người phụ trách theo đầu mối -----
+// phuAuto = true: danh sách người phụ trách đang do hệ thống điền (chưa bị người dùng chọn tay) nên được đổi theo đầu mối
+let phuAuto = true;
+const selectedDauMoi = () => [...form.querySelectorAll('[name="dauMoi"]:checked')].map((box) => box.value);
+const selectedPeople = () => [...form.querySelectorAll('[name="phuTrach"]:checked')].map((box) => box.value);
+// Người phụ trách ít nhất một trong các đầu mối đã chọn, theo đúng thứ tự trong Danh mục
+const mappedPeople = (dauMoiList) => {
+  const wanted = new Set(dauMoiList);
+  return orderedNames("phuTrach").filter((person) => (PT_MAP[person] || []).some((d) => wanted.has(d)));
+};
+function renderPhuTrachBoxes(selected) {
+  const mapped = mappedPeople(selectedDauMoi());
+  const all = orderedNames("phuTrach");
+  const extra = selected.filter((person) => !all.includes(person));
+  const order = [...mapped, ...all.filter((person) => !mapped.includes(person)), ...extra];
+  $("phuTrachBoxes").innerHTML = order.length
+    ? order.map((person) => `<label${mapped.includes(person) ? ' class="is-mapped" title="Phụ trách đầu mối đã chọn"' : ""}><input type="checkbox" name="phuTrach" value="${esc(person)}" ${selected.includes(person) ? "checked" : ""}> <span>${esc(person)}</span></label>`).join("")
+    : '<p class="hint">Chưa có người phụ trách. Hãy thêm trong Danh mục.</p>';
+}
+$("dauMoiBoxes").addEventListener("change", () => {
+  const mapped = mappedPeople(selectedDauMoi());
+  let next = selectedPeople();
+  if (phuAuto || !next.length) {
+    if (mapped.length) { next = [mapped[0]]; phuAuto = true; }   // nhiều người: lấy người đầu tiên trong danh sách
+    else if (phuAuto) next = [];
+  }
+  renderPhuTrachBoxes(next);
+});
+$("phuTrachBoxes").addEventListener("change", () => { phuAuto = false; });   // người dùng đã chọn tay
+
 function openForm(t, requestedParentId = null) {
   editingId = t ? t.id : null;
   $("dlgTitle").textContent = t ? "Sửa công việc" : "Thêm công việc";
@@ -1106,14 +1249,15 @@ function openForm(t, requestedParentId = null) {
   const d = t || { stt: nextStt(), dauMoi: [], status: Object.keys(TRANG_THAI)[0], phuTrach: "", parentId: requestedParentId };
   renderBoxes(d.dauMoi);
   fillSelect(form.status, "", orderedNames("trangThai"));
-  fillSelect(form.phuTrach, "Chưa chọn", people());
+  phuAuto = !t;
+  renderPhuTrachBoxes(toPeople(d.phuTrach));
   const hasChildren = !!t && tasks.some((task) => String(task.parentId) === String(t.id));
   const parentOptions = tasks.filter((task) => !task.parentId && (!t || String(task.id) !== String(t.id)));
   form.parentId.innerHTML = '<option value="">Nội dung độc lập</option>' + parentOptions.map((parent) =>
     `<option value="${esc(parent.id)}">STT ${esc(parent.stt)} · ${esc(String(parent.noiDung).slice(0, 55))}</option>`).join("");
   form.parentId.value = d.parentId == null ? "" : String(d.parentId);
   form.parentId.disabled = hasChildren;
-  ["stt", "maBV", "noiDung", "ghiChu", "ngayHop", "deadline", "status", "phuTrach", "logYC", "bienBan"]
+  ["stt", "maBV", "noiDung", "ghiChu", "ngayHop", "deadline", "status", "logYC", "bienBan"]
     .forEach((k) => { form[k].value = k === "ngayHop" || k === "deadline" ? isoToDisplayDate(d[k]) : d[k] ?? ""; });
   form.querySelector('[data-date-picker="ngayHop"]').value = d.ngayHop || "";
   form.querySelector('[data-date-picker="deadline"]').value = d.deadline || "";
@@ -1141,7 +1285,7 @@ form.addEventListener("submit", (e) => {
     maBV: form.maBV.value.trim(), noiDung: form.noiDung.value.trim(), ghiChu: form.ghiChu.value.trim(),
     quiTrinh: form.quiTrinh.checked, ngayHop, deadline,
     parentId: form.parentId.value ? tasks.find((task) => String(task.id) === form.parentId.value)?.id ?? null : null,
-    status: form.status.value, phuTrach: form.phuTrach.value.trim(),
+    status: form.status.value, phuTrach: selectedPeople(),
     logYC: form.logYC.value.trim(), bienBan: form.bienBan.value.trim(),
   };
   const i = tasks.findIndex((x) => x.id === t.id);
@@ -1173,16 +1317,20 @@ function closeCellPop(rerender = true) {
   if (rerender) render();   // áp dụng lại bộ lọc/đếm sau khi tick xong
 }
 
-function openDauMoiPop(td, task) {
+function openMultiPop(td, task, field) {
   closeCellPop();
-  const names = orderedNames("dauMoi");
-  const options = [...names, ...task.dauMoi.filter((x) => !names.includes(x))];
+  const isPerson = field === "phuTrach";
+  const names = orderedNames(isPerson ? "phuTrach" : "dauMoi");
+  const current = isPerson ? toPeople(task.phuTrach) : task.dauMoi;
+  const options = [...names, ...current.filter((x) => !names.includes(x))];
+  const paint = (o) => (isPerson ? tag(o, "person") : tag(o, DAU_MOI[o] || "grey"));
   const el = document.createElement("div");
   el.className = "cell-pop";
   el.setAttribute("role", "group");
-  el.setAttribute("aria-label", "Chọn đầu mối");
-  el.innerHTML = options.map((o) => `<label><input type="checkbox" value="${esc(o)}" ${task.dauMoi.includes(o) ? "checked" : ""}> ${tag(o, DAU_MOI[o] || "grey")}</label>`).join("")
-    + '<button type="button" class="cell-pop-done">Xong</button>';
+  el.setAttribute("aria-label", isPerson ? "Chọn người phụ trách" : "Chọn đầu mối");
+  el.innerHTML = options.length
+    ? options.map((o) => `<label><input type="checkbox" value="${esc(o)}" ${current.includes(o) ? "checked" : ""}> ${paint(o)}</label>`).join("") + '<button type="button" class="cell-pop-done">Xong</button>'
+    : '<p class="hint">Chưa có mục nào trong Danh mục.</p><button type="button" class="cell-pop-done">Xong</button>';
   document.body.appendChild(el);
   const rect = td.getBoundingClientRect();
   el.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - el.offsetWidth - 8))}px`;
@@ -1190,8 +1338,9 @@ function openDauMoiPop(td, task) {
   el.style.top = `${below + el.offsetHeight > window.innerHeight - 8 ? Math.max(8, rect.top - el.offsetHeight - 4) : below}px`;
   el.addEventListener("change", () => {
     const checked = new Set([...el.querySelectorAll("input:checked")].map((i) => i.value));
-    task.dauMoi = options.filter((o) => checked.has(o));
-    td.innerHTML = task.dauMoi.map((d) => tag(d, DAU_MOI[d] || "grey")).join("");   // cập nhật ngay tại ô
+    const next = options.filter((o) => checked.has(o));
+    if (isPerson) task.phuTrach = next; else task.dauMoi = next;
+    td.innerHTML = next.map(paint).join("");   // cập nhật ngay tại ô
     save();
   });
   el.querySelector(".cell-pop-done").addEventListener("click", () => closeCellPop());
@@ -1206,7 +1355,7 @@ function openDauMoiPop(td, task) {
 function startCellEdit(td) {
   const field = td.dataset.field, task = cellTask(td);
   if (!field || !task || cellPop) return;
-  if (field === "dauMoi") return openDauMoiPop(td, task);
+  if (field === "dauMoi" || field === "phuTrach") return openMultiPop(td, task, field);
   if (td.querySelector(".cell-edit")) return;
   const original = td.innerHTML;
   let el;
@@ -1356,9 +1505,74 @@ const COLOR_PICKER_VALUES = {
 };
 const catMap = (type) => (type === "dauMoi" ? DAU_MOI : TRANG_THAI);
 const countUse = (type, name) => tasks.filter((t) =>
-  type === "dauMoi" ? t.dauMoi.includes(name) : type === "trangThai" ? t.status === name : t.phuTrach === name).length;
+  type === "dauMoi" ? t.dauMoi.includes(name) : type === "trangThai" ? t.status === name : toPeople(t.phuTrach).includes(name)).length;
+
+// ----- Ô chọn nhiều đầu mối (combobox): các lựa chọn hiển thị dạng nhãn ngay trong ô -----
+let newPersonDm = [];   // đầu mối đang chọn cho người sắp thêm
+let msPop = null;
+const dmTags = (list) => list.length
+  ? list.map((d) => tag(d, DAU_MOI[d] || "grey")).join("")
+  : '<span class="ms-ph">Chọn đầu mối…</span>';
+const msBox = (extraAttrs, list) => `<button type="button" class="ms-box" aria-haspopup="listbox" aria-expanded="false" ${extraAttrs}><span class="ms-tags">${dmTags(list)}</span><span class="ms-caret" aria-hidden="true">▾</span></button>`;
+
+function closeMsPicker() {
+  if (!msPop) return;
+  const { el, box, onDown, onKey } = msPop;
+  msPop = null;
+  document.removeEventListener("mousedown", onDown, true);
+  document.removeEventListener("keydown", onKey, true);
+  el.remove();
+  box.setAttribute("aria-expanded", "false");
+}
+
+function openMsPicker(box) {
+  if (msPop && msPop.box === box) return closeMsPicker();
+  closeMsPicker();
+  const isNew = box.dataset.ms === "new";
+  const person = box.dataset.name;
+  const names = orderedNames("dauMoi");
+  const current = () => (isNew ? newPersonDm : PT_MAP[person] || []);
+  const el = document.createElement("div");
+  el.className = "cell-pop ms-pop";
+  el.setAttribute("role", "listbox");
+  el.setAttribute("aria-multiselectable", "true");
+  el.innerHTML = names.length
+    ? names.map((d) => `<label><input type="checkbox" value="${esc(d)}" ${current().includes(d) ? "checked" : ""}> ${tag(d, DAU_MOI[d] || "grey")}</label>`).join("")
+    : '<p class="hint">Chưa có đầu mối nào.</p>';
+  mgr.appendChild(el);   // phải nằm trong hộp thoại thì mới hiện phía trên nó
+  const place = () => {
+    const r = box.getBoundingClientRect();
+    el.style.minWidth = `${Math.max(200, Math.round(r.width))}px`;
+    el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8))}px`;
+    const below = r.bottom + 4;
+    el.style.top = `${below + el.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - el.offsetHeight - 4) : below}px`;
+  };
+  place();
+  box.setAttribute("aria-expanded", "true");
+  el.addEventListener("change", () => {
+    const picked = new Set([...el.querySelectorAll("input:checked")].map((i) => i.value));
+    const list = names.filter((d) => picked.has(d));
+    if (isNew) newPersonDm = list;
+    else { PT_MAP[person] = list; saveCats(); }
+    box.querySelector(".ms-tags").innerHTML = dmTags(list);
+    place();   // ô có thể cao thêm khi có nhiều nhãn
+  });
+  const onDown = (e) => { if (!el.contains(e.target) && !box.contains(e.target)) closeMsPicker(); };
+  const onKey = (e) => {
+    if (e.key !== "Escape" && e.key !== "Enter") return;
+    e.preventDefault(); e.stopPropagation();
+    closeMsPicker();
+    box.focus();
+  };
+  document.addEventListener("mousedown", onDown, true);
+  document.addEventListener("keydown", onKey, true);
+  msPop = { el, box, onDown, onKey };
+  el.querySelector("input")?.focus();
+}
 
 function renderMgr() {
+  closeMsPicker();
+  newPersonDm = newPersonDm.filter((d) => d in DAU_MOI);
   const tabs = document.querySelectorAll(".mgr-tab");
   tabs.forEach((button) => {
     const isActive = button.dataset.mgrTab === activeMgrTab;
@@ -1368,6 +1582,15 @@ function renderMgr() {
 
   const attrs = (type, name, act) => `data-act="${act}" data-type="${type}" data-name="${esc(name)}"`;
   const row = (type, name, color, index) => {
+    if (type === "phuTrach") {
+      return `
+      <div class="mrow mrow-person" data-type="${type}" data-name="${esc(name)}" draggable="true">
+        <span class="stt-cell">${index + 1}</span>
+        <input ${attrs(type, name, "rename")} value="${esc(name)}">
+        ${msBox(`data-ms="row" data-name="${esc(name)}"`, PT_MAP[name] || [])}
+        <button type="button" class="cat-del" ${attrs(type, name, "del")} title="Xóa danh mục" aria-label="Xóa danh mục">×</button>
+      </div>`;
+    }
     const pickerValue = isHexColor(color) ? color : COLOR_PICKER_VALUES[color] || "#d4e8fb";
     const colorControl = type === "phuTrach"
       ? '<span class="color-slot" aria-hidden="true"></span>'
@@ -1385,14 +1608,24 @@ function renderMgr() {
   const currentTab = MGR_TABS.find((tab) => tab.key === activeMgrTab) || MGR_TABS[0];
   const currentItems = orderedEntries(currentTab.key);
 
+  const isPerson = currentTab.key === "phuTrach";
+  const addBox = isPerson
+    ? `<div class="addrow addrow-top addrow-person">
+        <input data-new="phuTrach" placeholder="Thêm người phụ trách mới">
+        ${msBox('data-ms="new"', newPersonDm)}
+        <button type="button" data-act="add" data-type="phuTrach">Thêm</button>
+      </div>`
+    : `<div class="addrow addrow-top">
+        <input data-new="${currentTab.key}" placeholder="Thêm ${currentTab.label.toLowerCase()} mới">
+        <input type="color" data-new-color value="#d4e8fb" aria-label="Chọn màu cho danh mục mới" title="Chọn màu">
+        <button type="button" data-act="add" data-type="${currentTab.key}">Thêm</button>
+      </div>`;
+
   $("mgrBody").innerHTML = `
     <section class="mgr-section">
       <h3>${currentTab.label}</h3>
-      <div class="addrow addrow-top ${currentTab.key === "phuTrach" ? "addrow-no-color" : ""}">
-        <input data-new="${currentTab.key}" placeholder="Thêm ${currentTab.label.toLowerCase()} mới">
-        ${currentTab.key === "phuTrach" ? "" : '<input type="color" data-new-color value="#d4e8fb" aria-label="Chọn màu cho danh mục mới" title="Chọn màu">'}
-        <button type="button" data-act="add" data-type="${currentTab.key}">Thêm</button>
-      </div>
+      ${isPerson ? '<p class="hint">Mỗi người phụ trách gắn với các đầu mối họ phụ trách. Khi tạo công việc và chọn đầu mối, hệ thống tự điền người đầu tiên trong danh sách này (kéo thả để đổi thứ tự); vẫn chọn lại được người khác đã gắn với đầu mối.</p>' : ""}
+      ${addBox}
       <div class="mgr-list">
         ${currentItems.map(([n, c], idx) => row(currentTab.key, n, c, idx)).join("") || '<p class="hint">Chưa có mục nào.</p>'}
       </div>
@@ -1402,6 +1635,7 @@ function renderMgr() {
 document.querySelectorAll(".mgr-tab").forEach((button) => {
   button.addEventListener("click", () => {
     activeMgrTab = button.dataset.mgrTab;
+    newPersonDm = [];
     renderMgr();
   });
 });
@@ -1426,12 +1660,13 @@ function reorderCat(type, fromName, toName) {
   }
 }
 
-function addCat(type, name, color) {
+function addCat(type, name, color, dauMoiList = []) {
   name = name.trim();
   if (!name) return;
   if (type === "phuTrach") {
     if (!PHU_TRACH.includes(name)) {
       PHU_TRACH.push(name);
+      PT_MAP[name] = orderedNames("dauMoi").filter((d) => dauMoiList.includes(d));
       setCatOrder("phuTrach", PHU_TRACH.slice());
     }
   } else if (!(name in catMap(type))) {
@@ -1448,15 +1683,17 @@ function renameCat(type, old, nw) {
   const exists = type === "phuTrach" ? PHU_TRACH.includes(nw) : nw in catMap(type);
   if (!nw || exists) { alert(!nw ? "Tên không được để trống." : `"${nw}" đã tồn tại.`); return; }
   if (type === "phuTrach") {
+    if (PT_MAP[old]) { PT_MAP[nw] = PT_MAP[old]; delete PT_MAP[old]; }
     PHU_TRACH = PHU_TRACH.map((p) => (p === old ? nw : p));
     setCatOrder("phuTrach", PHU_TRACH.slice());
-    tasks.forEach((t) => { if (t.phuTrach === old) t.phuTrach = nw; });
+    tasks.forEach((t) => { const list = toPeople(t.phuTrach); if (list.includes(old)) t.phuTrach = list.map((p) => (p === old ? nw : p)); });
     return;
   }
   const order = orderedNames(type).map((name) => (name === old ? nw : name));
   const renamed = Object.fromEntries(Object.entries(catMap(type)).map(([k, v]) => [k === old ? nw : k, v]));
   if (type === "dauMoi") {
     DAU_MOI = renamed;
+    Object.keys(PT_MAP).forEach((p) => { PT_MAP[p] = PT_MAP[p].map((d) => (d === old ? nw : d)); });
     setCatOrder("dauMoi", order);
     tasks.forEach((t) => { t.dauMoi = t.dauMoi.map((d) => (d === old ? nw : d)); });
   } else {
@@ -1474,6 +1711,7 @@ async function deleteCat(type, name) {
   if (!(await askYesNo(n ? `Có ${n} công việc đang dùng "${name}". Xóa sẽ bỏ nhãn này khỏi các việc đó. Tiếp tục?` : `Xóa "${name}"?`))) return;
   if (type === "dauMoi") {
     delete DAU_MOI[name];
+    Object.keys(PT_MAP).forEach((p) => { PT_MAP[p] = PT_MAP[p].filter((d) => d !== name); });
     setCatOrder("dauMoi", orderedNames("dauMoi"));
     tasks.forEach((t) => { t.dauMoi = t.dauMoi.filter((d) => d !== name); });
   } else if (type === "trangThai") {
@@ -1482,8 +1720,9 @@ async function deleteCat(type, name) {
     DA_XONG = DA_XONG.filter((s) => s !== name);
   } else {
     PHU_TRACH = PHU_TRACH.filter((p) => p !== name);
+    delete PT_MAP[name];
     setCatOrder("phuTrach", PHU_TRACH.slice());
-    tasks.forEach((t) => { if (t.phuTrach === name) t.phuTrach = ""; });
+    tasks.forEach((t) => { const list = toPeople(t.phuTrach); if (list.includes(name)) t.phuTrach = list.filter((p) => p !== name); });
   }
 }
 
@@ -1491,13 +1730,18 @@ function afterMgrChange() { syncCatOrder(); save(); saveCats(); renderMgr(); ren
 
 $("btnHomeMgr").onclick = () => { renderMgr(); mgr.showModal(); };
 $("btnMgrClose").onclick = () => mgr.close();
+mgr.addEventListener("close", closeMsPicker);
 
 $("mgrBody").addEventListener("click", async (e) => {
+  const msButton = e.target.closest(".ms-box");
+  if (msButton) { openMsPicker(msButton); return; }
   const { act, type, name } = e.target.dataset;
   if (act === "add") {
-    const input = e.target.parentElement.querySelector("[data-new]");
-    const color = e.target.parentElement.querySelector("[data-new-color]")?.value;
-    addCat(type, input.value, color);
+    const box = e.target.closest(".addrow");
+    const input = box.querySelector("[data-new]");
+    const color = box.querySelector("[data-new-color]")?.value;
+    addCat(type, input.value, color, type === "phuTrach" ? newPersonDm : []);
+    if (type === "phuTrach" && input.value.trim()) newPersonDm = [];
     afterMgrChange();
   } else if (act === "del") {
     await deleteCat(type, name);
@@ -1556,8 +1800,11 @@ $("mgrBody").addEventListener("change", (e) => {
 $("mgrBody").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.dataset.new) {
     e.preventDefault();
-    const color = e.target.parentElement.querySelector("[data-new-color]")?.value;
-    addCat(e.target.dataset.new, e.target.value, color);
+    const box = e.target.closest(".addrow");
+    const color = box.querySelector("[data-new-color]")?.value;
+    const isPerson = e.target.dataset.new === "phuTrach";
+    addCat(e.target.dataset.new, e.target.value, color, isPerson ? newPersonDm : []);
+    if (isPerson && e.target.value.trim()) newPersonDm = [];
     afterMgrChange();
   }
 });
@@ -1568,7 +1815,7 @@ document.querySelectorAll("[data-close]").forEach((b) => {
 });
 
 // ===== Tick nhanh cột Qui trình (có hỏi xác nhận Có/Không) =====
-function askYesNo(msg) {
+function askYesNo(msg, focusYes = false) {
   return new Promise((resolve) => {
     const cf = $("cf");
     $("cfMsg").textContent = msg;
@@ -1577,6 +1824,7 @@ function askYesNo(msg) {
     $("cfNo").onclick = () => done(false);
     cf.oncancel = () => resolve(false); // bấm Esc = Không
     cf.showModal();
+    if (focusYes) $("cfYes").focus();   // xóa nhanh: Enter = Có
   });
 }
 
@@ -1690,7 +1938,7 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
       maBV: text("maBV"), noiDung, ghiChu: text("ghiChu"),
       quiTrinh: typeof quiTrinh === "boolean" ? quiTrinh : ["co", "yes", "true", "1", "x"].includes(quiTrinhText),
       ngayHop, deadline, status: text("status") || Object.keys(TRANG_THAI)[0] || "",
-      phuTrach: text("phuTrach"), logYC: text("logYC"), bienBan: text("bienBan"),
+      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: text("logYC"), bienBan: text("bienBan"),
     });
     if (outlineLevel === 0) currentOutlineParent = recordIndex;
   });
@@ -1727,7 +1975,7 @@ const EXPORT_COLS = [
   { label: "Ngày họp", width: 12, date: true, value: (t) => t.ngayHop },
   { label: "Deadline", width: 12, date: true, value: (t) => t.deadline },
   { label: "Trạng thái", width: 16, value: (t) => t.status || "" },
-  { label: "Phụ trách", width: 14, value: (t) => t.phuTrach || "" },
+  { label: "Phụ trách", width: 22, value: (t) => toPeople(t.phuTrach).join(", ") },
   { label: "Log yêu cầu", width: 30, link: true, value: (t) => t.logYC || "" },
   { label: "Biên bản làm rõ", width: 30, link: true, value: (t) => t.bienBan || "" },
 ];
@@ -1796,9 +2044,14 @@ importDlg.addEventListener("change", (e) => {
 $("btnImportCancel").onclick = () => importDlg.close();
 importDlg.addEventListener("close", () => { pendingImport = null; });
 
-$("btnImportCommit").addEventListener("click", () => {
+$("btnImportCommit").addEventListener("click", async () => {
   if (!pendingImport?.records.length) return;
   const mode = importDlg.querySelector('[name="importMode"]:checked').value;
+  if (mode === "replace" && tasks.length) {
+    const shared = window.SYNC_USER ? " Dữ liệu này dùng chung cả nhóm: mọi người sẽ thấy thay đổi." : "";
+    const ok = await askYesNo(`Thay thế toàn bộ ${tasks.length} công việc hiện có bằng ${pendingImport.records.length} công việc từ file?${shared} Thao tác này không hoàn tác được.`);
+    if (!ok || !pendingImport?.records.length) return;
+  }
   const usedStts = new Set((mode === "append" ? tasks : []).map((task) => Number(task.stt)).filter(Number.isSafeInteger));
   let availableBank = mode === "append" ? sttBank.slice() : [];
   const allocateStt = () => {
@@ -1835,7 +2088,7 @@ $("btnImportCommit").addEventListener("click", () => {
       if (!Object.prototype.hasOwnProperty.call(DAU_MOI, name)) DAU_MOI[name] = nextColor(DAU_MOI);
     });
     if (task.status && !Object.prototype.hasOwnProperty.call(TRANG_THAI, task.status)) TRANG_THAI[task.status] = nextColor(TRANG_THAI);
-    if (task.phuTrach && !PHU_TRACH.includes(task.phuTrach)) PHU_TRACH.push(task.phuTrach);
+    toPeople(task.phuTrach).forEach((p) => { if (!PHU_TRACH.includes(p)) PHU_TRACH.push(p); });
   });
   tasks = mode === "append" ? [...tasks, ...imported] : imported;
   sttBank = availableBank;
@@ -1851,3 +2104,41 @@ $("btnImportCommit").addEventListener("click", () => {
 });
 
 render();
+
+// ===== Nhận thay đổi từ máy khác: nạp lại từ localStorage và vẽ lại tại chỗ (không tải lại trang) =====
+// supabase-sync.js đã ghi bản đã merge vào localStorage trước khi gọi hàm này.
+// Mọi thao tác của app đều lưu ngay vào localStorage nên bộ nhớ trong và localStorage luôn khớp nhau.
+function applyRemoteChanges(keys) {
+  const has = (...names) => !keys || names.some((name) => keys.includes(name));
+  let boardChanged = false;
+  if (has(KEY)) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(KEY));
+      if (Array.isArray(stored)) { tasks = stored; normalizePeople(); boardChanged = true; }
+    } catch (e) {}
+  }
+  if (has(STT_BANK_KEY)) { loadSttBank(); boardChanged = true; }
+  if (has(CAT_KEY, KEY)) { loadCats(); boardChanged = true; }
+  if (has(LIST_KEY)) personalTasks = readStoredArray(LIST_KEY).filter((item) => item && typeof item.title === "string");
+  if (has(NOTES_KEY)) notes = readStoredArray(NOTES_KEY).filter((note) => note && typeof note.title === "string");
+  if (boardChanged) {
+    repairSttIfNeeded();
+    normalizeSttBank();
+    closeCellPop(false);   // popover đang giữ tham chiếu tới đối tượng cũ
+    render();              // render() cũng vẽ lại trang chủ
+  } else {
+    renderHome();
+  }
+  if (!$("listScreen").hidden && has(LIST_KEY)) {
+    const input = $("inlineTaskTitle");
+    const typed = input ? input.value : "";
+    const focused = !!input && document.activeElement === input;
+    renderPersonalTasks();
+    const next = $("inlineTaskTitle");
+    if (next && typed) next.value = typed;
+    if (next && focused) next.focus();
+  }
+  if (!$("notesScreen").hidden && has(NOTES_KEY)) renderNotes();
+  if (mgr.open && has(CAT_KEY, KEY) && !$("mgrBody").contains(document.activeElement)) renderMgr();
+}
+window.APP_APPLY_REMOTE = applyRemoteChanges;
