@@ -46,10 +46,10 @@
         <section class="wf-card wf-todo" aria-label="Todo list">
           <div class="wf-card-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span><div><h2>Todo list</h2><p>Quản lý công việc hằng ngày của bạn</p></div></div>
           <form id="wfQuick" class="wf-quick"><input id="wfQuickTitle" required maxlength="180" placeholder="Nhập tên công việc rồi nhấn Enter" aria-label="Tên công việc mới"><button class="wf-add" type="submit">Thêm</button></form>
-          <div class="wf-chips"><button type="button" data-wf-filter="all">Tất cả</button><button type="button" data-wf-filter="open">Chưa hoàn thành</button><button type="button" data-wf-filter="late">Quá hạn</button><button type="button" data-wf-filter="done">Đã hoàn thành</button></div>
+          <div class="wf-chips"><button type="button" data-wf-filter="d30">30 ngày</button><button type="button" data-wf-filter="open">Chưa hoàn thành</button><button type="button" data-wf-filter="late">Quá hạn</button><button type="button" data-wf-filter="done">Đã hoàn thành</button></div>
           <div class="wf-table"><table><thead><tr><th></th><th>Công việc</th><th>Hạn hoàn thành</th><th>Trạng thái</th><th></th></tr></thead><tbody id="wfRows"></tbody></table></div>
           <p id="wfEmpty" class="wf-empty" hidden>Chưa có công việc nào phù hợp.</p>
-          <div class="wf-foot"><span id="wfInfo"></span><div id="wfPager" class="wf-pager"></div></div>
+          <div class="wf-foot"><span id="wfInfo"></span></div>
         </section>
         <section class="wf-card" aria-label="Ghi chú">
           <div class="wf-card-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg></span><div><h2>Ghi chú</h2><p>Lưu lại những điều quan trọng</p></div></div>
@@ -92,7 +92,7 @@
   <main id="listScreen" class="app-screen list-screen" hidden>
     <header class="screen-topbar list-topbar">
       <div class="screen-title"><span>WORK / PERSONAL</span><h1>Danh sách công việc</h1></div>
-      <div class="list-toolbar"><label class="list-search"><span aria-hidden="true">⌕</span><input id="listSearch" type="search" placeholder="Tìm trong danh sách"></label><select id="listFilter" aria-label="Lọc trạng thái"><option value="all">Tất cả</option><option value="open">Chưa hoàn thành</option><option value="done">Đã hoàn thành</option><option value="late">Quá hạn</option></select><select id="listSort" aria-label="Sắp xếp"><option value="deadline">Hạn gần nhất</option><option value="created">Mới tạo</option><option value="title">Tên A–Z</option></select></div>
+      <div class="list-toolbar"><label class="list-search"><span aria-hidden="true">⌕</span><input id="listSearch" type="search" placeholder="Tìm trong danh sách"></label><select id="listFilter" aria-label="Lọc trạng thái"><option value="all">Tất cả</option><option value="open">Chưa hoàn thành</option><option value="done">Đã hoàn thành</option><option value="late">Quá hạn</option></select><select id="listSort" aria-label="Sắp xếp"><option value="deadline">Hạn gần nhất</option><option value="created">Mới tạo</option><option value="title">Tên A–Z</option></select><label class="list-date"><span>Tạo từ</span><input id="listFrom" type="date" aria-label="Lọc từ ngày tạo"></label><label class="list-date"><span>đến</span><input id="listTo" type="date" aria-label="Lọc đến ngày tạo"></label><button type="button" id="listDateClear" hidden>Xóa lọc ngày</button></div>
     </header>
     <section class="list-board-content">
       <div class="list-subbar"><div class="list-view-label"><span>☷</span> Việc cần làm <span id="listCountLabel"></span></div><span class="list-board-hint">Chọn tiêu đề để mở ghi chú</span></div>

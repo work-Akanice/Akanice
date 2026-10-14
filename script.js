@@ -411,7 +411,7 @@ function render() {
   });
 }
 
-const wf = { f: "all", p: 1, q: "", nq: "" };
+const wf = { f: "open", q: "", nq: "" };   // f: d30 (30 ngày) | open | late | done
 const WF_COLORS = { sage: "#6f9c6b", peach: "#f08a4b", yellow: "#e0a826", blue: "#4a82d6", lilac: "#8a63c9" };
 const isoAdd = (iso, n) => { const [y, m, d] = iso.split("-").map(Number), t = new Date(y, m - 1, d + n); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
 const weekStart = (iso) => { const [y, m, d] = iso.split("-").map(Number); return isoAdd(iso, -((new Date(y, m - 1, d).getDay() + 6) % 7)); };
@@ -438,20 +438,18 @@ function renderHome() {
   if ($("homeSnapshot")) $("homeSnapshot").textContent = `${tasks.length} nhiệm vụ · ${late} cần chú ý`;
 
   // Todo list (công việc cá nhân)
+  // Mọi bộ lọc của Todo chỉ xét các việc tạo trong 30 ngày gần nhất (tính cả hôm nay); việc cũ chưa có ngày tạo vẫn hiển thị
   const q = lc(wf.q);
-  const rows = personalTasks.filter((i) => (wf.f === "all" || (wf.f === "open" && !i.done) || (wf.f === "late" && listIsLate(i)) || (wf.f === "done" && i.done)) && (!q || lc(i.title).includes(q)))
+  const since = isoAdd(today(), -29);
+  const inWindow = (i) => !i.createdAt || String(i.createdAt).slice(0, 10) >= since;
+  const rows = personalTasks.filter((i) => inWindow(i) && (wf.f === "d30" || (wf.f === "open" && !i.done) || (wf.f === "late" && listIsLate(i)) || (wf.f === "done" && i.done)) && (!q || lc(i.title).includes(q)))
     .sort(listCompare);
-  const pages = Math.max(1, Math.ceil(rows.length / 8));
-  wf.p = Math.min(wf.p, pages);
-  const from = (wf.p - 1) * 8, show = rows.slice(from, from + 8);
-  $("wfRows").innerHTML = show.map((i) => {
+  $("wfRows").innerHTML = rows.map((i) => {
     const [label, cls] = i.done ? ["Đã hoàn thành", "ok"] : listIsLate(i) ? ["Quá hạn", "late"] : ["Chưa hoàn thành", "todo"];
-    return `<tr class="${i.done ? "is-done" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button>${taskHasNote(i) ? '<span class="wf-note-mark" title="Có ghi chú nội dung" aria-label="Có ghi chú nội dung">✎</span>' : ""}</td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
+    return `<tr class="${i.done ? "is-done" : ""}${isTodayTask(i) ? " is-today" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button>${taskHasNote(i) ? '<span class="wf-note-mark" title="Có ghi chú nội dung" aria-label="Có ghi chú nội dung">✎</span>' : ""}</td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
   }).join("");
   $("wfEmpty").hidden = rows.length > 0;
-  $("wfInfo").textContent = rows.length ? `Hiển thị ${from + 1} - ${from + show.length} trong ${rows.length} công việc` : "";
-  const nums = []; for (let n = Math.max(1, wf.p - 2); n <= Math.min(pages, wf.p + 2); n++) nums.push(n);
-  $("wfPager").innerHTML = pages < 2 ? "" : `<button type="button" data-wf-page="${Math.max(1, wf.p - 1)}" aria-label="Trang trước">‹</button>${nums.map((n) => `<button type="button" data-wf-page="${n}" ${n === wf.p ? 'class="on" aria-current="page"' : ""}>${n}</button>`).join("")}<button type="button" data-wf-page="${Math.min(pages, wf.p + 1)}" aria-label="Trang sau">›</button>`;
+  $("wfInfo").textContent = rows.length ? `${rows.length} công việc trong 30 ngày gần nhất` : "";
   document.querySelectorAll("[data-wf-filter]").forEach((b) => b.classList.toggle("on", b.dataset.wfFilter === wf.f));
 
   // Ghi chú
@@ -472,8 +470,7 @@ function renderHome() {
   home.addEventListener("click", (e) => {
     const hit = (sel) => e.target.closest(sel);
     if (!hit("#wfUser")) $("wfMenu").hidden = true;
-    if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; wf.p = 1; renderHome(); }
-    else if (hit("[data-wf-page]")) { wf.p = Number(hit("[data-wf-page]").dataset.wfPage); renderHome(); }
+    if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; renderHome(); }
     else if (hit("[data-wf-del]")) deletePersonalTask(hit("[data-wf-del]").dataset.wfDel);
     else if (hit("[data-wf-edit]")) openTaskNote(hit("[data-wf-edit]").dataset.wfEdit);
     else if (hit("[data-wf-note-del]")) deleteNote(hit("[data-wf-note-del]").dataset.wfNoteDel);
@@ -488,14 +485,14 @@ function renderHome() {
     if (!item) return;
     item.done = box.checked; savePersonalTasks(); renderHome();
   });
-  $("wfSearch").addEventListener("input", (e) => { wf.q = e.target.value.trim(); wf.p = 1; renderHome(); });
+  $("wfSearch").addEventListener("input", (e) => { wf.q = e.target.value.trim(); renderHome(); });
   $("wfNoteSearch").addEventListener("input", (e) => { wf.nq = e.target.value.trim(); renderHome(); });
   $("wfQuick").addEventListener("submit", (e) => {
     e.preventDefault();
     const title = $("wfQuickTitle").value.trim(); if (!title) return;
     const item = { id: makeLocalId(), title, deadline: "", done: false, createdAt: today(), noteText: "", images: [] };
     personalTasks.push(item); savePersonalTasks();
-    $("wfQuickTitle").value = ""; wf.f = "all"; wf.p = 1;
+    $("wfQuickTitle").value = ""; if (wf.f === "late" || wf.f === "done") wf.f = "open";   // việc mới (tạo hôm nay, chưa xong) luôn nằm trong 30 ngày
     renderHome(); openTaskNote(item.id, true); // mở hộp thoại để đặt hạn / ghi chú, con trỏ vào ô nội dung
   });
 })();
@@ -536,6 +533,7 @@ const formatLocalDate = (value) => {
   return new Intl.DateTimeFormat("vi-VN").format(new Date(year, month - 1, day));
 };
 const listIsLate = (item) => !item.done && item.deadline && item.deadline < today();
+const isTodayTask = (item) => !item.done && item.deadline === today();   // việc có hạn hôm nay: tô nền nhẹ
 // Thứ tự Todo: hôm nay -> sắp tới (gần nhất trước) -> chưa có hạn -> đã xong -> quá hạn (cuối cùng)
 const listRank = (item) => {
   if (item.done) return 5;
@@ -561,10 +559,15 @@ function renderPersonalTasks() {
   const query = $("listSearch").value.trim().toLocaleLowerCase("vi");
   const filter = $("listFilter").value;
   const sort = $("listSort").value;
+  let dateFrom = $("listFrom").value, dateTo = $("listTo").value;   // lọc theo ngày tạo công việc
+  if (dateFrom && dateTo && dateFrom > dateTo) [dateFrom, dateTo] = [dateTo, dateFrom];
+  $("listDateClear").hidden = !($("listFrom").value || $("listTo").value);
   const visible = personalTasks.filter((item) => {
     const textMatches = !query || item.title.toLocaleLowerCase("vi").includes(query);
     const filterMatches = filter === "all" || (filter === "open" && !item.done) || (filter === "done" && item.done) || (filter === "late" && listIsLate(item));
-    return textMatches && filterMatches;
+    const created = String(item.createdAt || "").slice(0, 10);
+    const dateMatches = (!dateFrom && !dateTo) || (created && (!dateFrom || created >= dateFrom) && (!dateTo || created <= dateTo));
+    return textMatches && filterMatches && dateMatches;
   }).sort((a, b) => {
     if (sort === "created") return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     if (sort === "title") return a.title.localeCompare(b.title, "vi");
@@ -573,7 +576,7 @@ function renderPersonalTasks() {
   const taskRows = visible.map((item) => {
     const images = Array.isArray(item.images) ? item.images : [];
     const hasNote = Boolean(item.noteText || item.note || images.length);
-    return `<tr class="${item.done ? "list-row-done" : ""} ${listIsLate(item) ? "list-row-late" : ""}">
+    return `<tr class="${item.done ? "list-row-done" : ""} ${listIsLate(item) ? "list-row-late" : ""} ${isTodayTask(item) ? "list-row-today" : ""}">
       <td class="list-title-cell"><button type="button" class="list-title-button" data-edit-list="${esc(item.id)}"><span class="list-file-icon" aria-hidden="true">▯</span><span class="list-title-text">${esc(item.title)}</span>${hasNote ? `<span class="list-note-mark" title="Có ghi chú">✎</span>` : ""}${images.length ? `<span class="list-image-count" title="${images.length} ảnh">▧ ${images.length}</span>` : ""}</button><button type="button" class="list-row-delete" data-delete-list="${esc(item.id)}" aria-label="Xóa ${esc(item.title)}" title="Xóa công việc">×</button></td>
       <td class="${listIsLate(item) ? "personal-date-late" : ""}">${formatLocalDate(item.deadline)}</td>
       <td class="list-done-cell"><input type="checkbox" data-toggle-list="${esc(item.id)}" ${item.done ? "checked" : ""} aria-label="Đánh dấu ${esc(item.title)} hoàn tất"></td>
@@ -740,6 +743,9 @@ $("listRows").addEventListener("click", (event) => {
 $("listSearch").addEventListener("input", renderPersonalTasks);
 $("listFilter").addEventListener("change", renderPersonalTasks);
 $("listSort").addEventListener("change", renderPersonalTasks);
+$("listFrom").addEventListener("change", renderPersonalTasks);
+$("listTo").addEventListener("change", renderPersonalTasks);
+$("listDateClear").addEventListener("click", () => { $("listFrom").value = ""; $("listTo").value = ""; renderPersonalTasks(); });
 
 async function deleteNote(id) {
   const note = notes.find((item) => String(item.id) === String(id));
