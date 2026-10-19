@@ -178,8 +178,17 @@
 
           <label>Thuộc nội dung cha <select name="parentId"></select></label>
 
-          <label>Log yêu cầu (link) <input name="logYC" type="url" placeholder="https://"></label>
-          <label>Biên bản làm rõ (link) <input name="bienBan" type="url" placeholder="https://"></label>
+          <label>Version build chức năng <input name="versionBuild" maxlength="60" placeholder="VD: 2.5.1.0"></label>
+          <fieldset class="link-field" data-links="logYC">
+            <legend>Log yêu cầu (link)</legend>
+            <div class="link-rows"></div>
+            <button type="button" class="link-add" data-add-link="logYC">＋ Thêm link</button>
+          </fieldset>
+          <fieldset class="link-field" data-links="bienBan">
+            <legend>Biên bản làm rõ (link)</legend>
+            <div class="link-rows"></div>
+            <button type="button" class="link-add" data-add-link="bienBan">＋ Thêm link</button>
+          </fieldset>
 
           <div class="writing-pair">
             <label class="writing-field">Nội dung theo dõi

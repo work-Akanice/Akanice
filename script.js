@@ -4,6 +4,12 @@ const toPeople = (value) => Array.isArray(value)
   ? [...new Set(value.map((x) => String(x ?? "").trim()).filter(Boolean))]
   : (value && String(value).trim() ? [String(value).trim()] : []);
 
+// Log yêu cầu / Biên bản làm rõ lưu dạng mảng link (nhiều đường link). Dữ liệu cũ dạng chữ được tách thành mảng.
+const toLinks = (value) => {
+  const list = Array.isArray(value) ? value : String(value ?? "").split(/[\s;|]+/);
+  return [...new Set(list.map((x) => String(x ?? "").trim()).filter(Boolean))];
+};
+
 // ===== Danh mục: muốn thêm/bớt lựa chọn thì sửa ở đây =====
 let DAU_MOI = {
   "Điều dưỡng": "red", "TCKT": "yellow", "KHTH": "green", "CNTT": "dark", "Cấp cứu": "orange",
@@ -37,7 +43,17 @@ const sample = [
 let tasks;
 try { tasks = JSON.parse(localStorage.getItem(KEY)); } catch (e) { tasks = null; }
 if (!Array.isArray(tasks)) tasks = sample;
-const normalizePeople = () => tasks.forEach((t) => { if (t && typeof t === "object") t.phuTrach = toPeople(t.phuTrach); });
+const normalizePeople = () => tasks.forEach((t) => {
+  if (!t || typeof t !== "object") return;
+  t.phuTrach = toPeople(t.phuTrach);
+  t.logYC = toLinks(t.logYC);
+  t.bienBan = toLinks(t.bienBan);
+});
+// Số yêu cầu "thực": chỉ tính việc đơn lẻ + việc con (không tính việc cha) - dùng chung cho trang chủ và màn Yêu cầu
+const leafTasks = () => {
+  const parentIds = new Set(tasks.filter(hasParent).map((task) => String(task.parentId)));
+  return tasks.filter((task) => !parentIds.has(String(task.id)));
+};
 normalizePeople();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch (e) {} };
 const readStoredArray = (key) => {
@@ -208,7 +224,11 @@ const tag = (text, color) => {
   const foreground = brightness > 150 ? "#26221d" : "#ffffff";
   return `<span class="tag" style="background:${color};color:${foreground}">${esc(text)}</span>`;
 };
-const link = (u) => (/^https?:\/\//.test(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener">Mở link</a>` : "");
+const links = (value) => {
+  const list = toLinks(value).filter((u) => /^https?:\/\//i.test(u));
+  if (!list.length) return "";
+  return `<span class="link-list">${list.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}">${list.length > 1 ? `Link ${i + 1}` : "Mở link"}</a>`).join("")}</span>`;
+};
 
 // ===== Ô chọn & danh mục =====
 function fillSelect(el, first, options) {
@@ -236,8 +256,9 @@ const COLS = [
   { key: "deadline", label: "Deadline", type: "date", get: (t) => t.deadline || "" },
   { key: "status", label: "Trạng thái", type: "list", get: (t) => one(t.status) },
   { key: "phuTrach", label: "Phụ trách", type: "list", get: (t) => (toPeople(t.phuTrach).length ? toPeople(t.phuTrach) : ["(Trống)"]) },
-  { key: "logYC", label: "Log yêu cầu", type: "list", get: (t) => [t.logYC ? "Có link" : "Chưa có"] },
-  { key: "bienBan", label: "Biên bản làm rõ", type: "list", get: (t) => [t.bienBan ? "Có link" : "Chưa có"] },
+  { key: "logYC", label: "Log yêu cầu", type: "list", get: (t) => [toLinks(t.logYC).length ? "Có link" : "Chưa có"] },
+  { key: "bienBan", label: "Biên bản làm rõ", type: "list", get: (t) => [toLinks(t.bienBan).length ? "Có link" : "Chưa có"] },
+  { key: "versionBuild", label: "Version build", type: "list", get: (t) => one(t.versionBuild) },
 ];
 const filters = {}; // key -> { ex:Set } (list) | { text } (text) | { from, to } (date)
 let quickFilter = "";
@@ -290,6 +311,8 @@ const ICON_CHILD = SVG('<path d="M4 4v16"/><path d="M4 10h8"/><path d="M12 7v12"
 const ICON_PICK_CHILD = SVG('<path d="M9 6h11M9 12h11M9 18h6"/><path d="m3 6 1 1 2-2M3 12l1 1 2-2"/><path d="M19 14v6m-3-3h6"/>');
 const ICON_COLLAPSE = SVG('<path d="m6 9 6 6 6-6"/>');
 const ICON_EXPAND = SVG('<path d="m9 6 6 6-6 6"/>');
+const ICON_EYE = SVG('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>');
+const ICON_EYE_OFF = SVG('<path d="M17.94 17.94A10.9 10.9 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/>');
 
 function renderHead() {
   $("head").innerHTML = "<tr>" + COLS.map((c) => `
@@ -326,7 +349,7 @@ function render() {
 
   const q = $("fSearch").value.trim().toLowerCase();
   const filteredTasks = tasks
-    .filter((t) => passesQuickFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, toPeople(t.phuTrach).join(" ")].join(" ").toLowerCase().includes(q)) && passes(t))
+    .filter((t) => passesQuickFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, t.versionBuild, toPeople(t.phuTrach).join(" ")].join(" ").toLowerCase().includes(q)) && passes(t))
     .sort((a, b) => a.stt - b.stt);
   const taskById = new Map(tasks.map((task) => [String(task.id), task]));
   const visibleIds = new Set(filteredTasks.map((task) => String(task.id)));
@@ -386,8 +409,9 @@ function render() {
       <td class="c cell-editable"${EDIT_ATTRS("deadline", true)}>${fmt(t.deadline)}</td>
       <td${EDIT_ATTRS("status")}>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
       <td${EDIT_ATTRS("phuTrach")}>${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
-      <td class="c">${link(t.logYC)}</td>
-      <td class="c">${link(t.bienBan)}</td>
+      <td class="c">${links(t.logYC)}</td>
+      <td class="c">${links(t.bienBan)}</td>
+      <td class="c">${esc(t.versionBuild)}</td>
       <td class="row-actions">
         ${!parent ? `<button type="button" class="icon-btn" data-add-child="${esc(t.id)}" title="Thêm nội dung con" aria-label="Thêm nội dung con">${ICON_CHILD}</button>` : ""}
         ${!parent ? `<button type="button" class="icon-btn" data-pick-children="${esc(t.id)}" title="Gán nội dung có sẵn" aria-label="Gán nội dung có sẵn">${ICON_PICK_CHILD}</button>` : ""}
@@ -400,7 +424,7 @@ function render() {
 
   $("empty").hidden = list.length > 0;
   const late = tasks.filter(isLate).length;
-  const parentIds = new Set(tasks.filter(hasParent).map((task) => String(task.parentId)));
+  const parentIds = new Set(tasks.filter(hasParent).map((task) => String(task.parentId)));   // cùng định nghĩa với leafTasks()
   const shownCount = filteredTasks.filter((task) => !parentIds.has(String(task.id))).length;   // chỉ tính việc đơn lẻ + việc con
   $("count").innerHTML = `<span class="count-label">Tổng số:</span><strong class="count-total">${shownCount}</strong>`;
   renderHome();
@@ -427,15 +451,16 @@ function renderHome() {
   const open = tasks.filter((t) => !DA_XONG.includes(t.status));
   const inRange = (t, a, b) => t.deadline && t.deadline >= a && t.deadline <= b;
   const late = tasks.filter(isLate).length;
-  [["wfTotal", tasks.length], ["wfLate", late], ["wfWeek", open.filter((t) => inRange(t, ws, we)).length], ["wfNext", open.filter((t) => inRange(t, ns, ne)).length], ["wfDone", tasks.length - open.length]]
+  const total = leafTasks().length;   // khớp với bộ đếm "Tổng số" ở màn Yêu cầu (khi chưa lọc)
+  [["wfTotal", total], ["wfLate", late], ["wfWeek", open.filter((t) => inRange(t, ws, we)).length], ["wfNext", open.filter((t) => inRange(t, ns, ne)).length], ["wfDone", tasks.length - open.length]]
     .forEach(([id, v]) => { $(id).textContent = v; });
   // từ ver2: số đếm trên 3 lối vào + dòng tóm tắt
   const openPersonal = personalTasks.filter((t) => !t.done).length;
   const setCount = (id, n, label) => { const el = $(id); if (!el) return; el.textContent = n; el.title = `${n} ${label}`; };
-  setCount("portalBoardCount", tasks.length, "công việc");
+  setCount("portalBoardCount", total, "công việc");
   setCount("portalListCount", openPersonal, "đang mở");
   setCount("portalNotesCount", notes.length, "ghi chú");
-  if ($("homeSnapshot")) $("homeSnapshot").textContent = `${tasks.length} nhiệm vụ · ${late} cần chú ý`;
+  if ($("homeSnapshot")) $("homeSnapshot").textContent = `${total} nhiệm vụ · ${late} cần chú ý`;
 
   // Todo list (công việc cá nhân)
   // Mọi bộ lọc của Todo chỉ xét các việc tạo trong 30 ngày gần nhất (tính cả hôm nay); việc cũ chưa có ngày tạo vẫn hiển thị
@@ -453,10 +478,11 @@ function renderHome() {
   document.querySelectorAll("[data-wf-filter]").forEach((b) => b.classList.toggle("on", b.dataset.wfFilter === wf.f));
 
   // Ghi chú
-  const list = notes.filter((n) => [wf.q, wf.nq].every((s) => !s || lc(`${n.title} ${n.content}`).includes(lc(s))))
+  const list = notes.filter((n) => !n.hideHome).filter((n) => [wf.q, wf.nq].every((s) => !s || lc(`${n.title} ${n.content}`).includes(lc(s))))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  $("wfNotes").innerHTML = list.map((n) => `<div class="wf-note-item"><button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button><button type="button" class="wf-note-del" data-wf-note-del="${esc(n.id)}" aria-label="Xóa ghi chú: ${esc(n.title)}" title="Xóa ghi chú">×</button></div>`).join("");
+  $("wfNotes").innerHTML = list.map((n) => `<div class="wf-note-item"><button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button><button type="button" class="wf-note-hide" data-wf-note-hide="${esc(n.id)}" aria-label="Ẩn ghi chú khỏi trang chủ: ${esc(n.title)}" title="Ẩn khỏi trang chủ (vẫn còn trong Thư viện ghi chú)">${ICON_EYE_OFF}</button><button type="button" class="wf-note-del" data-wf-note-del="${esc(n.id)}" aria-label="Xóa ghi chú: ${esc(n.title)}" title="Xóa ghi chú">×</button></div>`).join("");
   $("wfNotesEmpty").hidden = list.length > 0;
+  $("wfNotesEmpty").textContent = !list.length && !wf.q && !wf.nq && notes.some((n) => n.hideHome) ? "Các ghi chú đang được ẩn khỏi trang chủ. Mở Thư viện ghi chú để hiện lại." : "Chưa có ghi chú nào.";
 }
 
 (() => {
@@ -473,6 +499,7 @@ function renderHome() {
     if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; renderHome(); }
     else if (hit("[data-wf-del]")) deletePersonalTask(hit("[data-wf-del]").dataset.wfDel);
     else if (hit("[data-wf-edit]")) openTaskNote(hit("[data-wf-edit]").dataset.wfEdit);
+    else if (hit("[data-wf-note-hide]")) toggleNoteHome(hit("[data-wf-note-hide]").dataset.wfNoteHide);
     else if (hit("[data-wf-note-del]")) deleteNote(hit("[data-wf-note-del]").dataset.wfNoteDel);
     else if (hit("[data-wf-note]")) openNote(hit("[data-wf-note]").dataset.wfNote);
     else if (hit("#wfAddNote")) openNote();
@@ -483,7 +510,7 @@ function renderHome() {
     const box = e.target.closest("[data-wf-toggle]");
     const item = box && personalTasks.find((t) => String(t.id) === box.dataset.wfToggle);
     if (!item) return;
-    item.done = box.checked; savePersonalTasks(); renderHome();
+    setTaskDone(item, box.checked); savePersonalTasks(); renderHome();
   });
   $("wfSearch").addEventListener("input", (e) => { wf.q = e.target.value.trim(); renderHome(); });
   $("wfNoteSearch").addEventListener("input", (e) => { wf.nq = e.target.value.trim(); renderHome(); });
@@ -541,7 +568,14 @@ const listRank = (item) => {
   const t = today();
   return item.deadline === t ? 0 : item.deadline > t ? 1 : 4;
 };
-const listCompare = (a, b) => listRank(a) - listRank(b) || (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31");
+// Việc đã xong: mới hoàn thành gần nhất xếp trước (việc cũ chưa có doneAt xuống cuối, xếp theo ngày tạo mới -> cũ)
+const listCompare = (a, b) => {
+  const rank = listRank(a) - listRank(b);
+  if (rank) return rank;
+  if (a.done && b.done) return String(b.doneAt || "").localeCompare(String(a.doneAt || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  return (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31");
+};
+const setTaskDone = (item, done) => { item.done = done; if (done) item.doneAt = new Date().toISOString(); else delete item.doneAt; };
 async function deletePersonalTask(id) {
   const item = personalTasks.find((t) => String(t.id) === String(id));
   if (!item) return;
@@ -616,8 +650,8 @@ function renderNotes() {
     const imagePreviews = images.slice(0, 4).map((image) => `<img src="${esc(image.src)}" alt="${esc(image.name || "Ảnh ghi chú")}">`).join("");
     return `
     <article class="note-card note-${["sage", "peach", "blue", "lilac", "yellow"].includes(note.color) ? note.color : "sage"}">
-      <button type="button" class="note-open" data-edit-note="${esc(note.id)}"><span class="note-card-top"><span>${note.tag ? esc(note.tag) : "GHI CHÚ"}${images.length ? ` · ▧ ${images.length}` : ""}</span><span>${formatLocalDate(note.updatedAt)}</span></span><strong>${esc(note.title)}</strong><span class="note-excerpt">${esc(note.content || "Chưa có nội dung")}</span>${imagePreviews ? `<span class="note-card-image-strip">${imagePreviews}</span>` : ""}</button>
-      <div class="note-card-actions"><button type="button" class="note-pin ${note.pinned ? "is-pinned" : ""}" data-toggle-pin="${esc(note.id)}" aria-label="${note.pinned ? "Bỏ ghim" : "Ghim ghi chú"}" title="${note.pinned ? "Bỏ ghim" : "Ghim ghi chú"}">${note.pinned ? "★" : "☆"}</button><button type="button" data-delete-note="${esc(note.id)}" aria-label="Xóa ghi chú" title="Xóa ghi chú">×</button></div>
+      <button type="button" class="note-open" data-edit-note="${esc(note.id)}"><span class="note-card-top"><span>${note.tag ? esc(note.tag) : "GHI CHÚ"}${images.length ? ` · ▧ ${images.length}` : ""}${note.hideHome ? " · Đã ẩn ở trang chủ" : ""}</span><span>${formatLocalDate(note.updatedAt)}</span></span><strong>${esc(note.title)}</strong><span class="note-excerpt">${esc(note.content || "Chưa có nội dung")}</span>${imagePreviews ? `<span class="note-card-image-strip">${imagePreviews}</span>` : ""}</button>
+      <div class="note-card-actions"><button type="button" class="note-home ${note.hideHome ? "is-hidden" : ""}" data-toggle-home="${esc(note.id)}" aria-label="${note.hideHome ? "Hiện ở trang chủ" : "Ẩn khỏi trang chủ"}" title="${note.hideHome ? "Hiện ở trang chủ" : "Ẩn khỏi trang chủ"}">${note.hideHome ? ICON_EYE_OFF : ICON_EYE}</button><button type="button" class="note-pin ${note.pinned ? "is-pinned" : ""}" data-toggle-pin="${esc(note.id)}" aria-label="${note.pinned ? "Bỏ ghim" : "Ghim ghi chú"}" title="${note.pinned ? "Bỏ ghim" : "Ghim ghi chú"}">${note.pinned ? "★" : "☆"}</button><button type="button" data-delete-note="${esc(note.id)}" aria-label="Xóa ghi chú" title="Xóa ghi chú">×</button></div>
     </article>`;
   }).join("");
   $("noteTotal").textContent = String(notes.length).padStart(2, "0");
@@ -730,7 +764,7 @@ $("listRows").addEventListener("change", (event) => {
   if (!checkbox) return;
   const item = personalTasks.find((task) => String(task.id) === checkbox.dataset.toggleList);
   if (!item) return;
-  item.done = checkbox.checked;
+  setTaskDone(item, checkbox.checked);
   savePersonalTasks();
   renderPersonalTasks();
 });
@@ -747,6 +781,14 @@ $("listFrom").addEventListener("change", renderPersonalTasks);
 $("listTo").addEventListener("change", renderPersonalTasks);
 $("listDateClear").addEventListener("click", () => { $("listFrom").value = ""; $("listTo").value = ""; renderPersonalTasks(); });
 
+// Ẩn / hiện một ghi chú ở trang chủ (ghi chú vẫn còn trong Thư viện ghi chú)
+function toggleNoteHome(id) {
+  const note = notes.find((item) => String(item.id) === String(id));
+  if (!note) return;
+  if (note.hideHome) delete note.hideHome; else note.hideHome = true;
+  saveNotes();
+  if (!$("notesScreen").hidden) renderNotes(); else renderHome();
+}
 async function deleteNote(id) {
   const note = notes.find((item) => String(item.id) === String(id));
   if (!note) return;
@@ -1057,6 +1099,8 @@ noteForm.addEventListener("submit", (event) => {
 $("notesGrid").addEventListener("click", (event) => {
   const edit = event.target.closest("[data-edit-note]");
   if (edit) return openNote(edit.dataset.editNote);
+  const homeToggle = event.target.closest("[data-toggle-home]");
+  if (homeToggle) return toggleNoteHome(homeToggle.dataset.toggleHome);
   const pin = event.target.closest("[data-toggle-pin]");
   if (pin) {
     const note = notes.find((item) => String(item.id) === pin.dataset.togglePin);
@@ -1263,8 +1307,10 @@ function openForm(t, requestedParentId = null) {
     `<option value="${esc(parent.id)}">STT ${esc(parent.stt)} · ${esc(String(parent.noiDung).slice(0, 55))}</option>`).join("");
   form.parentId.value = d.parentId == null ? "" : String(d.parentId);
   form.parentId.disabled = hasChildren;
-  ["stt", "maBV", "noiDung", "ghiChu", "ngayHop", "deadline", "status", "logYC", "bienBan"]
+  ["stt", "maBV", "noiDung", "ghiChu", "ngayHop", "deadline", "status", "versionBuild"]
     .forEach((k) => { form[k].value = k === "ngayHop" || k === "deadline" ? isoToDisplayDate(d[k]) : d[k] ?? ""; });
+  renderLinkRows("logYC", toLinks(d.logYC));
+  renderLinkRows("bienBan", toLinks(d.bienBan));
   form.querySelector('[data-date-picker="ngayHop"]').value = d.ngayHop || "";
   form.querySelector('[data-date-picker="deadline"]').value = d.deadline || "";
   form.ngayHop.setCustomValidity("");
@@ -1274,8 +1320,43 @@ function openForm(t, requestedParentId = null) {
   dlg.showModal();
 }
 
+// ----- Log yêu cầu / Biên bản làm rõ: nhiều ô link, bấm "Thêm link" (hoặc Enter) để thêm ô mới -----
+const linkBox = (name) => form.querySelector(`[data-links="${name}"]`);
+const linkRowHtml = (value = "") => `<div class="link-row"><input type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://" value="${esc(value)}" aria-label="Đường link"><button type="button" class="link-del" data-del-link title="Xóa link" aria-label="Xóa link">×</button></div>`;
+function renderLinkRows(name, list) {
+  linkBox(name).querySelector(".link-rows").innerHTML = (list.length ? list : [""]).map(linkRowHtml).join("");
+}
+const readLinks = (name) => toLinks([...linkBox(name).querySelectorAll(".link-row input")].map((input) => input.value).join(" "));   // dán nhiều link cách nhau bằng dấu cách/xuống dòng cũng được tách ra
+function addLinkRow(name, afterRow = null) {
+  const rows = linkBox(name).querySelector(".link-rows");
+  const holder = document.createElement("div");
+  holder.innerHTML = linkRowHtml();
+  const row = holder.firstElementChild;
+  if (afterRow && afterRow.parentNode === rows) afterRow.after(row); else rows.appendChild(row);
+  row.querySelector("input").focus();
+}
+form.addEventListener("click", (e) => {
+  const add = e.target.closest("[data-add-link]");
+  if (add) return addLinkRow(add.dataset.addLink);
+  const del = e.target.closest("[data-del-link]");
+  if (!del) return;
+  const row = del.closest(".link-row"), rows = row.parentNode;
+  if (rows.children.length > 1) row.remove(); else row.querySelector("input").value = "";
+});
+form.addEventListener("keydown", (e) => {
+  const input = e.target.closest(".link-row input");
+  if (!input || e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();   // Enter trong ô link: thêm ô mới thay vì gửi form
+  if (input.value.trim()) addLinkRow(input.closest("[data-links]").dataset.links, input.closest(".link-row"));
+});
+form.addEventListener("input", (e) => { if (e.target.closest(".link-row")) e.target.setCustomValidity(""); });
 form.addEventListener("submit", (e) => {
   e.preventDefault();
+  for (const input of form.querySelectorAll(".link-row input")) {
+    const bad = toLinks(input.value).find((u) => !/^https?:\/\//i.test(u));
+    if (bad) { input.setCustomValidity("Link phải bắt đầu bằng http:// hoặc https://"); input.reportValidity(); return; }
+  }
+  const logYC = readLinks("logYC"), bienBan = readLinks("bienBan");
   const ngayHop = displayDateToIso(form.ngayHop.value);
   const deadline = displayDateToIso(form.deadline.value);
   if (ngayHop === null || deadline === null) {
@@ -1292,7 +1373,7 @@ form.addEventListener("submit", (e) => {
     quiTrinh: form.quiTrinh.checked, ngayHop, deadline,
     parentId: form.parentId.value ? tasks.find((task) => String(task.id) === form.parentId.value)?.id ?? null : null,
     status: form.status.value, phuTrach: selectedPeople(),
-    logYC: form.logYC.value.trim(), bienBan: form.bienBan.value.trim(),
+    logYC, bienBan, versionBuild: form.versionBuild.value.trim(),
   };
   const i = tasks.findIndex((x) => x.id === t.id);
   if (i >= 0) {
@@ -1862,6 +1943,7 @@ const IMPORT_FIELD_ALIASES = {
   phuTrach: ["phutrach"],
   logYC: ["logyeucau", "logyc"],
   bienBan: ["bienbanlamro", "bienban"],
+  versionBuild: ["versionbuild", "version", "buildversion", "phienbanbuild"],
 };
 const normalizedImportHeader = (value) => String(value ?? "").trim().toLowerCase()
   .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[^a-z0-9]/g, "");
@@ -1944,7 +2026,7 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
       maBV: text("maBV"), noiDung, ghiChu: text("ghiChu"),
       quiTrinh: typeof quiTrinh === "boolean" ? quiTrinh : ["co", "yes", "true", "1", "x"].includes(quiTrinhText),
       ngayHop, deadline, status: text("status") || Object.keys(TRANG_THAI)[0] || "",
-      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: text("logYC"), bienBan: text("bienBan"),
+      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: toLinks(text("logYC")), bienBan: toLinks(text("bienBan")), versionBuild: text("versionBuild"),
     });
     if (outlineLevel === 0) currentOutlineParent = recordIndex;
   });
@@ -1982,8 +2064,9 @@ const EXPORT_COLS = [
   { label: "Deadline", width: 12, date: true, value: (t) => t.deadline },
   { label: "Trạng thái", width: 16, value: (t) => t.status || "" },
   { label: "Phụ trách", width: 22, value: (t) => toPeople(t.phuTrach).join(", ") },
-  { label: "Log yêu cầu", width: 30, link: true, value: (t) => t.logYC || "" },
-  { label: "Biên bản làm rõ", width: 30, link: true, value: (t) => t.bienBan || "" },
+  { label: "Log yêu cầu", width: 30, link: true, value: (t) => toLinks(t.logYC).join("\n") },
+  { label: "Biên bản làm rõ", width: 30, link: true, value: (t) => toLinks(t.bienBan).join("\n") },
+  { label: "Version build", width: 16, value: (t) => t.versionBuild || "" },
 ];
 const isoToExcelSerial = (iso) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
@@ -2002,7 +2085,7 @@ $("btnExport").addEventListener("click", async () => {
         const cell = ws[XLSX.utils.encode_cell({ r: i + 1, c })];
         if (!cell) return;
         if (col.date && typeof cell.v === "number") cell.z = "dd/mm/yyyy";
-        if (col.link && /^https?:\/\//.test(row[c])) cell.l = { Target: row[c] };
+        if (col.link && /^https?:\/\/\S+$/.test(row[c])) cell.l = { Target: row[c] };
       });
     });
     ws["!cols"] = EXPORT_COLS.map((col) => ({ wch: col.width }));

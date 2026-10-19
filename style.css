@@ -284,7 +284,7 @@ th{ white-space: nowrap; z-index: 2; }
 #cf p{ margin: 0 0 4px; }
 
 /* ===== Độ rộng cột linh hoạt ===== */
-/* Bảng rộng ra theo cửa sổ; hẹp hơn 2040px thì hiện thanh cuộn ngang ở cuối cửa sổ */table{ table-layout: auto; width: 100%; min-width: 2040px; }
+/* Bảng rộng ra theo cửa sổ; hẹp hơn 2040px thì hiện thanh cuộn ngang ở cuối cửa sổ */table{ table-layout: auto; width: 100%; min-width: 2170px; }
 th:nth-child(1){ min-width: 70px; }
    /* STT */th:nth-child(2){ min-width: 140px; }
   /* Đầu mối */th:nth-child(3){ min-width: 90px; }
@@ -297,7 +297,8 @@ th:nth-child(1){ min-width: 70px; }
   /* Trạng thái */th:nth-child(10){ min-width: 120px; }
   /* Phụ trách */th:nth-child(11){ min-width: 120px; }
   /* Log yêu cầu */th:nth-child(12){ min-width: 160px; }
-  /* Biên bản làm rõ */th:nth-child(13){ min-width: 140px; }
+  /* Biên bản làm rõ */th:nth-child(13){ min-width: 130px; }
+  /* Version build */th:nth-child(14){ min-width: 140px; }
  /* Nút quan hệ/Sửa/Xóa */
 
 /* ===== Nút icon Sửa / Xóa ===== */.row-actions{ text-align: center; }
@@ -1897,3 +1898,38 @@ button.primary:hover,
 /* ---------- Hộp thoại: một kiểu thanh tiêu đề ---------- */
 .dlg-head,.task-note-dialog .dlg-head,.new-note-dialog .dlg-head{ background: #f6ede2; border-top: 3px solid #c9a888; }
 .task-note-kicker{ color: #7a4b1f; }
+
+
+/* ===== Nhiều link (Log yêu cầu / Biên bản) + Version build ===== */
+.link-list{ display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.link-list a{ white-space: nowrap; }
+textarea[name="logYC"],textarea[name="bienBan"]{ resize: vertical; min-height: 64px; }
+
+/* ===== Ẩn ghi chú khỏi trang chủ ===== */
+.wf-note-hide{ position: absolute; top: 8px; right: 36px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #9a8f85; cursor: pointer; opacity: 0; transition: opacity .15s, background .15s, color .15s; }
+.wf-note-hide svg{ pointer-events: none; }
+.wf-note-item:hover .wf-note-hide, .wf-note-hide:focus-visible{ opacity: 1; }
+.wf-note-hide:hover{ background: #f1e7dc; color: #84583f; }
+.wf-note-item .wf-note{ padding-right: 66px; }
+@media (hover: none){ .wf-note-hide{ opacity: 1; } }
+.note-card-actions .note-home svg{ pointer-events: none; }
+.note-card-actions .note-home.is-hidden{ color: #bd6e43; }
+
+/* ===== Todo list: chữ nội dung giống chữ nội dung của Ghi chú ===== */
+.wf-home .wf-todo .wf-table td .wf-link,
+.wf-home .wf-todo .wf-table tr.is-done .wf-link{ font-size: 13px; font-weight: 400; line-height: 1.5; color: var(--muted); }
+.wf-home .wf-todo .wf-table td .wf-link:hover{ color: var(--acc); }
+.wf-home .wf-todo .wf-table tr.is-done .wf-link{ text-decoration: line-through; }
+.list-title-text{ font-size: 13px; font-weight: 400; line-height: 1.5; }
+
+/* ===== Nhập nhiều link: mỗi link một ô ===== */
+.link-field .link-rows{ display: flex; flex-direction: column; gap: 6px; }
+.link-row{ display: flex; align-items: center; gap: 6px; }
+.link-row input{ flex: 1 1 auto; min-width: 0; }
+.link-row .link-del{ flex: none; width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 1; color: #9a8f85; }
+.link-row .link-del:hover{ background: #fdecea; color: #d93025; }
+.link-field .link-add{ margin-top: 8px; padding: 5px 12px; font-size: 13px; }
+
+/* ===== Ghi chú công việc (Todo): ô "Ghi chú" cùng kiểu chữ với "Nội dung" của Chỉnh sửa ghi chú ===== */
+.task-note-form .task-note-text-label textarea{ padding: 16px 18px; border-color: #e0d5c9; border-radius: 10px; background: #fff; color: #263747; font-size: 18px; font-weight: 400; line-height: 1.7; }
+.task-note-form .task-note-text-label textarea:focus{ border-color: #b88a67; box-shadow: 0 0 0 3px rgba(168,117,78,.16); outline: none; }
