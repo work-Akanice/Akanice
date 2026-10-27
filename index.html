@@ -72,11 +72,18 @@
 
  <section class="filters">
   <input id="fSearch" type="search" placeholder="Tìm nhanh trong toàn bộ bảng">
+  <label class="check hide-done"><input type="checkbox" id="fHideDone"> Ẩn yêu cầu đã hoàn thành</label>
   <div class="quick-filters" role="group" aria-label="Lọc nhanh theo hạn">
     <button type="button" class="quick-filter" data-quick-filter="late" aria-pressed="false">Trễ</button>
     <button type="button" class="quick-filter" data-quick-filter="thisWeek" aria-pressed="false">Trong tuần</button>
     <button type="button" class="quick-filter" data-quick-filter="nextWeek" aria-pressed="false">Tuần sau</button>
   </div>
+  <label class="due-mode">Tính theo
+    <select id="quickDateMode" aria-label="Trễ, Trong tuần, Tuần sau tính theo deadline nào">
+      <option value="deadline">Deadline</option>
+      <option value="deadlineCV">Deadline CV</option>
+    </select>
+  </label>
   <button id="btnClear">Xóa tất cả bộ lọc</button>
 </section>
 
@@ -162,6 +169,14 @@
               <input id="deadline" name="deadline" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/yyyy" autocomplete="off">
               <button type="button" class="date-picker-button" data-open-picker="deadline" title="Chọn deadline" aria-label="Chọn deadline"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18"></path></svg></button>
               <input type="date" class="native-date-picker" data-date-picker="deadline" tabindex="-1" aria-hidden="true">
+            </span>
+          </div>
+          <div class="date-field">
+            <label for="deadlineCV">Deadline CV</label>
+            <span class="date-entry">
+              <input id="deadlineCV" name="deadlineCV" type="text" inputmode="numeric" maxlength="10" placeholder="dd/mm/yyyy" autocomplete="off">
+              <button type="button" class="date-picker-button" data-open-picker="deadlineCV" title="Chọn deadline CV" aria-label="Chọn deadline CV"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18"></path></svg></button>
+              <input type="date" class="native-date-picker" data-date-picker="deadlineCV" tabindex="-1" aria-hidden="true">
             </span>
           </div>
         </div>

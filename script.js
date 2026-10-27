@@ -49,11 +49,8 @@ const normalizePeople = () => tasks.forEach((t) => {
   t.logYC = toLinks(t.logYC);
   t.bienBan = toLinks(t.bienBan);
 });
-// Số yêu cầu "thực": chỉ tính việc đơn lẻ + việc con (không tính việc cha) - dùng chung cho trang chủ và màn Yêu cầu
-const leafTasks = () => {
-  const parentIds = new Set(tasks.filter(hasParent).map((task) => String(task.parentId)));
-  return tasks.filter((task) => !parentIds.has(String(task.id)));
-};
+// Bộ đếm theo ĐẦU VIỆC CHA: chỉ tính việc độc lập + việc cha, không tính việc con
+const rootTasks = () => tasks.filter((task) => !hasParent(task));
 normalizePeople();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch (e) {} };
 const readStoredArray = (key) => {
@@ -66,6 +63,13 @@ let personalTasks = readStoredArray(LIST_KEY).filter((item) => item && typeof it
 let notes = readStoredArray(NOTES_KEY).filter((note) => note && typeof note.title === "string");
 const savePersonalTasks = () => { try { localStorage.setItem(LIST_KEY, JSON.stringify(personalTasks)); } catch (e) {} };
 const saveNotes = () => { try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (e) {} };
+// Thời điểm hiện tại theo giờ máy, dạng 2026-10-27T14:05:09.123 (so sánh chuỗi được với ngày YYYY-MM-DD)
+const nowLocalIso = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 23); };
+const noteCreated = (n) => String(n.createdAt || n.updatedAt || "");
+// Ghim lên đầu; còn lại ghi chú tạo mới nhất xếp trước (không theo ngày sửa)
+const noteCompare = (a, b) => Number(!!b.pinned) - Number(!!a.pinned) || noteCreated(b).localeCompare(noteCreated(a));
+// Ghi chú cũ chưa có ngày tạo: lấy ngày sửa gần nhất làm ngày tạo để từ nay sửa không làm đổi thứ tự
+if (notes.some((n) => !n.createdAt)) { notes.forEach((n) => { if (!n.createdAt) n.createdAt = n.updatedAt || nowLocalIso().slice(0, 10); }); saveNotes(); }
 let sttBank = [];
 const loadSttBank = () => {
   try {
@@ -100,7 +104,11 @@ const renumberTasksByGroup = (stableById = false) => {
   const byOldStt = (a, b) => (Number(a.stt) || 0) - (Number(b.stt) || 0) || (stableById ? idCompare(a, b) : 0);
   roots.sort(byOldStt);
   tasks = roots.flatMap((root) => [root, ...(children.get(String(root.id)) || []).sort(byOldStt)]);
-  tasks.forEach((task, index) => { task.stt = index + 1; });
+  // Chỉ đầu việc cha (và việc độc lập) được đánh STT 1..N; việc con đánh 1..k trong từng cha (hiển thị dạng "cha.con", vd 5.1)
+  roots.forEach((root, index) => {
+    root.stt = index + 1;
+    (children.get(String(root.id)) || []).forEach((child, j) => { child.stt = j + 1; });
+  });
   sttBank = [];
   normalizeSttBank();
 };
@@ -127,14 +135,20 @@ try {
 // Sau khi nhiều người cùng thêm/xóa rồi được merge, có thể phát sinh STT trùng hoặc việc con mất cha.
 // Phát hiện và đánh lại STT theo cách xác định (cùng dữ liệu => cùng kết quả trên mọi máy).
 const needsSttRepair = () => {
-  const ids = new Set(tasks.map((task) => String(task.id)));
-  const seen = new Set();
-  return tasks.some((task) => {
-    const n = Number(task.stt);
-    if (!Number.isSafeInteger(n) || n < 1 || seen.has(n)) return true;
-    seen.add(n);
-    return hasParent(task) && !ids.has(String(task.parentId));
-  });
+  const byId = new Map(tasks.map((task) => [String(task.id), task]));
+  const groups = new Map();   // "" = đầu việc cha / việc độc lập; còn lại theo id cha
+  for (const task of tasks) {
+    let key = "";
+    if (hasParent(task)) {
+      const parent = byId.get(String(task.parentId));
+      if (!parent || String(parent.id) === String(task.id) || hasParent(parent)) return true;
+      key = String(parent.id);
+    }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(Number(task.stt));
+  }
+  // mỗi nhóm phải đúng 1..n, không trùng, không hở
+  return [...groups.values()].some((list) => list.sort((a, b) => a - b).some((n, i) => !Number.isSafeInteger(n) || n !== i + 1));
 };
 const repairSttIfNeeded = () => {
   if (!needsSttRepair()) return false;
@@ -215,7 +229,24 @@ const displayDateToIso = (value) => {
   return `${yearText}-${monthText}-${dayText}`;
 };
 const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
-const isLate = (t) => t.deadline && t.deadline < today() && !DA_XONG.includes(t.status);
+// Trễ / Trong tuần / Tuần sau có thể tính theo "Deadline" hoặc "Deadline CV" (lưu riêng từng máy, không đồng bộ)
+const DUE_MODE_KEY = "wf-due-mode", HIDE_DONE_KEY = "wf-hide-done";
+let dueMode = "deadline";
+try { if (localStorage.getItem(DUE_MODE_KEY) === "deadlineCV") dueMode = "deadlineCV"; } catch (e) {}
+const dueOf = (t) => t[dueMode] || "";
+const plainText = (v) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+const NO_DUE_STATUS = new Set(["huy", "pending", "waiting"]);   // Hủy / Pending / Waiting: không tính trễ, trong tuần, tuần sau
+const isDone = (t) => DA_XONG.includes(t.status);
+const skipsDue = (t) => NO_DUE_STATUS.has(plainText(t.status));
+const isLate = (t) => { const d = dueOf(t); return !!d && d < today() && !isDone(t) && !skipsDue(t); };
+// STT hiển thị: đầu việc cha "5", việc con "5.1"
+const sttLabel = (t) => {
+  if (!hasParent(t)) return String(t.stt);
+  const parent = tasks.find((x) => String(x.id) === String(t.parentId));
+  return parent ? `${parent.stt}.${t.stt}` : String(t.stt);
+};
+let taskIndex = new Map();   // id -> task (làm mới mỗi lần render)
+const sortKey = (t) => { const p = hasParent(t) ? taskIndex.get(String(t.parentId)) : null; return p ? Number(p.stt) + Number(t.stt) / 1e4 : Number(t.stt); };
 const isHexColor = (color) => /^#[\da-f]{6}$/i.test(String(color || ""));
 const tag = (text, color) => {
   if (!isHexColor(color)) return `<span class="tag ${esc(color)}">${esc(text)}</span>`;
@@ -246,7 +277,7 @@ function renderBoxes(selected) {
 // ===== Hiển thị + lọc ngay trên tiêu đề cột =====
 const one = (v) => [v || "(Trống)"];
 const COLS = [
-  { key: "stt", label: "STT", type: "text", get: (t) => String(t.stt) },
+  { key: "stt", label: "STT", type: "text", get: (t) => sttLabel(t) },
   { key: "dauMoi", label: "Đầu mối", type: "list", get: (t) => (t.dauMoi.length ? t.dauMoi : ["(Trống)"]) },
   { key: "maBV", label: "Mã BV", type: "list", get: (t) => one(t.maBV) },
   { key: "noiDung", label: "Nội dung theo dõi", type: "text", wide: true, get: (t) => String(t.noiDung ?? "") },
@@ -254,6 +285,7 @@ const COLS = [
   { key: "quiTrinh", label: "Qui trình", type: "list", get: (t) => [t.quiTrinh ? "Có" : "Chưa"] },
   { key: "ngayHop", label: "Ngày họp", type: "date", get: (t) => t.ngayHop || "" },
   { key: "deadline", label: "Deadline", type: "date", get: (t) => t.deadline || "" },
+  { key: "deadlineCV", label: "Deadline CV", type: "date", get: (t) => t.deadlineCV || "" },
   { key: "status", label: "Trạng thái", type: "list", get: (t) => one(t.status) },
   { key: "phuTrach", label: "Phụ trách", type: "list", get: (t) => (toPeople(t.phuTrach).length ? toPeople(t.phuTrach) : ["(Trống)"]) },
   { key: "logYC", label: "Log yêu cầu", type: "list", get: (t) => [toLinks(t.logYC).length ? "Có link" : "Chưa có"] },
@@ -261,7 +293,11 @@ const COLS = [
   { key: "versionBuild", label: "Version build", type: "list", get: (t) => one(t.versionBuild) },
 ];
 const filters = {}; // key -> { ex:Set } (list) | { text } (text) | { from, to } (date)
-let quickFilter = "";
+const quickFilters = new Set();   // chọn được nhiều mục cùng lúc: late | thisWeek | nextWeek (lấy hợp)
+let hideDone = false;
+try { hideDone = localStorage.getItem(HIDE_DONE_KEY) === "1"; } catch (e) {}
+let openChildParents = new Set();   // cha có ít nhất 1 việc con chưa xong (giữ lại để hiện nhóm khi đang ẩn việc đã xong)
+const passesDoneFilter = (task) => !hideDone || !isDone(task) || openChildParents.has(String(task.id));
 const collapsedGroups = new Set();
 let exportRows = []; // các dòng đang được lọc trên lưới (dùng cho nút Tải về)
 const weekRange = (offset) => {
@@ -274,11 +310,17 @@ const weekRange = (offset) => {
   return { from: toIso(monday), to: toIso(sunday) };
 };
 const passesQuickFilter = (task) => {
-  if (quickFilter === "late") return isLate(task);
-  if (quickFilter !== "thisWeek" && quickFilter !== "nextWeek") return true;
-  if (!task.deadline) return false;
-  const range = weekRange(quickFilter === "nextWeek" ? 1 : 0);
-  return task.deadline >= range.from && task.deadline <= range.to;
+  if (!quickFilters.size) return true;
+  if (isDone(task) || skipsDue(task)) return false;
+  const due = dueOf(task);
+  if (!due) return false;
+  if (quickFilters.has("late") && due < today()) return true;
+  for (const [name, offset] of [["thisWeek", 0], ["nextWeek", 1]]) {
+    if (!quickFilters.has(name)) continue;
+    const range = weekRange(offset);
+    if (due >= range.from && due <= range.to) return true;
+  }
+  return false;
 };
 const colOptions = (c) => [...new Set(tasks.flatMap((t) => c.get(t)))].sort((a, b) =>
   c.key === "maBV"
@@ -347,10 +389,12 @@ function render() {
   });
   renderHead();
 
+  taskIndex = new Map(tasks.map((task) => [String(task.id), task]));
+  openChildParents = new Set(tasks.filter((task) => hasParent(task) && !isDone(task)).map((task) => String(task.parentId)));
   const q = $("fSearch").value.trim().toLowerCase();
   const filteredTasks = tasks
-    .filter((t) => passesQuickFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, t.versionBuild, toPeople(t.phuTrach).join(" ")].join(" ").toLowerCase().includes(q)) && passes(t))
-    .sort((a, b) => a.stt - b.stt);
+    .filter((t) => passesQuickFilter(t) && passesDoneFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, t.versionBuild, toPeople(t.phuTrach).join(" ")].join(" ").toLowerCase().includes(q)) && passes(t))
+    .sort((a, b) => sortKey(a) - sortKey(b));
   const taskById = new Map(tasks.map((task) => [String(task.id), task]));
   const visibleIds = new Set(filteredTasks.map((task) => String(task.id)));
   const visibleChildren = new Map();
@@ -362,9 +406,9 @@ function render() {
       visibleChildren.get(parentKey).push(task);
     } else visibleRoots.push(task);
   });
-  visibleRoots.sort((a, b) => a.stt - b.stt);
+  visibleRoots.sort((a, b) => sortKey(a) - sortKey(b));
   const list = visibleRoots.flatMap((root) => {
-    const children = (visibleChildren.get(String(root.id)) || []).sort((a, b) => a.stt - b.stt);
+    const children = (visibleChildren.get(String(root.id)) || []).sort((a, b) => sortKey(a) - sortKey(b));
     return collapsedGroups.has(String(root.id)) ? [root] : [root, ...children];
   });
   exportRows = visibleRoots.flatMap((root) => [
@@ -395,7 +439,7 @@ function render() {
     const isCollapsed = collapsedGroups.has(String(t.id));
     return `
     <tr class="${rowClass}" data-task-id="${esc(t.id)}">
-      <td class="c">${esc(t.stt)}</td>
+      <td class="c">${esc(parent ? `${parent.stt}.${t.stt}` : t.stt)}</td>
       <td${EDIT_ATTRS("dauMoi")}>${t.dauMoi.map((d) => tag(d, DAU_MOI[d] || "grey")).join("")}</td>
       <td class="c">${esc(t.maBV)}</td>
       <td class="nd" title="${esc(t.noiDung)}"><span class="tree-cell">${parent
@@ -407,6 +451,7 @@ function render() {
       <td class="c"><input type="checkbox" class="qt" data-qt="${esc(t.id)}" ${t.quiTrinh ? "checked" : ""} aria-label="Qui trình"></td>
       <td class="c cell-editable"${EDIT_ATTRS("ngayHop", true)}>${fmt(t.ngayHop)}</td>
       <td class="c cell-editable"${EDIT_ATTRS("deadline", true)}>${fmt(t.deadline)}</td>
+      <td class="c cell-editable"${EDIT_ATTRS("deadlineCV", true)}>${fmt(t.deadlineCV)}</td>
       <td${EDIT_ATTRS("status")}>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
       <td${EDIT_ATTRS("phuTrach")}>${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
       <td class="c">${links(t.logYC)}</td>
@@ -423,13 +468,12 @@ function render() {
   syncFrozenColumns();
 
   $("empty").hidden = list.length > 0;
-  const late = tasks.filter(isLate).length;
-  const parentIds = new Set(tasks.filter(hasParent).map((task) => String(task.parentId)));   // cùng định nghĩa với leafTasks()
-  const shownCount = filteredTasks.filter((task) => !parentIds.has(String(task.id))).length;   // chỉ tính việc đơn lẻ + việc con
+  // Bộ đếm theo đầu việc cha: mỗi nhóm cha-con chỉ tính 1
+  const shownCount = new Set(filteredTasks.map((task) => (hasParent(task) && taskById.has(String(task.parentId)) ? String(task.parentId) : String(task.id)))).size;
   $("count").innerHTML = `<span class="count-label">Tổng số:</span><strong class="count-total">${shownCount}</strong>`;
   renderHome();
   document.querySelectorAll("[data-quick-filter]").forEach((button) => {
-    const active = button.dataset.quickFilter === quickFilter;
+    const active = quickFilters.has(button.dataset.quickFilter);
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
@@ -448,11 +492,12 @@ const taskHasNote = (item) => Boolean(String(item.noteText || item.note || "").t
 function renderHome() {
   // số liệu yêu cầu (Bảng công việc)
   const ws = weekStart(today()), we = isoAdd(ws, 6), ns = isoAdd(ws, 7), ne = isoAdd(ws, 13);
-  const open = tasks.filter((t) => !DA_XONG.includes(t.status));
-  const inRange = (t, a, b) => t.deadline && t.deadline >= a && t.deadline <= b;
-  const late = tasks.filter(isLate).length;
-  const total = leafTasks().length;   // khớp với bộ đếm "Tổng số" ở màn Yêu cầu (khi chưa lọc)
-  [["wfTotal", total], ["wfLate", late], ["wfWeek", open.filter((t) => inRange(t, ws, we)).length], ["wfNext", open.filter((t) => inRange(t, ns, ne)).length], ["wfDone", tasks.length - open.length]]
+  const roots = rootTasks();   // chỉ đếm đầu việc cha (+ việc độc lập), không đếm việc con
+  const open = roots.filter((t) => !isDone(t) && !skipsDue(t));
+  const inRange = (t, a, b) => { const d = dueOf(t); return d && d >= a && d <= b; };
+  const late = roots.filter(isLate).length;
+  const total = roots.length;   // khớp với bộ đếm "Tổng số" ở màn Yêu cầu (khi chưa lọc)
+  [["wfTotal", total], ["wfLate", late], ["wfWeek", open.filter((t) => inRange(t, ws, we)).length], ["wfNext", open.filter((t) => inRange(t, ns, ne)).length], ["wfDone", roots.filter(isDone).length]]
     .forEach(([id, v]) => { $(id).textContent = v; });
   // từ ver2: số đếm trên 3 lối vào + dòng tóm tắt
   const openPersonal = personalTasks.filter((t) => !t.done).length;
@@ -468,7 +513,7 @@ function renderHome() {
   const since = isoAdd(today(), -29);
   const inWindow = (i) => !i.createdAt || String(i.createdAt).slice(0, 10) >= since;
   const rows = personalTasks.filter((i) => inWindow(i) && (wf.f === "d30" || (wf.f === "open" && !i.done) || (wf.f === "late" && listIsLate(i)) || (wf.f === "done" && i.done)) && (!q || lc(i.title).includes(q)))
-    .sort(listCompare);
+    .sort(wf.f === "done" ? doneCompare : listCompare);
   $("wfRows").innerHTML = rows.map((i) => {
     const [label, cls] = i.done ? ["Đã hoàn thành", "ok"] : listIsLate(i) ? ["Quá hạn", "late"] : ["Chưa hoàn thành", "todo"];
     return `<tr class="${i.done ? "is-done" : ""}${isTodayTask(i) ? " is-today" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button>${taskHasNote(i) ? '<span class="wf-note-mark" title="Có ghi chú nội dung" aria-label="Có ghi chú nội dung">✎</span>' : ""}</td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
@@ -479,8 +524,8 @@ function renderHome() {
 
   // Ghi chú
   const list = notes.filter((n) => !n.hideHome).filter((n) => [wf.q, wf.nq].every((s) => !s || lc(`${n.title} ${n.content}`).includes(lc(s))))
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  $("wfNotes").innerHTML = list.map((n) => `<div class="wf-note-item"><button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(n.updatedAt)}</small></span></button><button type="button" class="wf-note-hide" data-wf-note-hide="${esc(n.id)}" aria-label="Ẩn ghi chú khỏi trang chủ: ${esc(n.title)}" title="Ẩn khỏi trang chủ (vẫn còn trong Thư viện ghi chú)">${ICON_EYE_OFF}</button><button type="button" class="wf-note-del" data-wf-note-del="${esc(n.id)}" aria-label="Xóa ghi chú: ${esc(n.title)}" title="Xóa ghi chú">×</button></div>`).join("");
+    .sort(noteCompare);
+  $("wfNotes").innerHTML = list.map((n) => `<div class="wf-note-item"><button type="button" class="wf-note" data-wf-note="${esc(n.id)}"><i style="background:${WF_COLORS[n.color] || "#c08a5a"}"></i><span><b>${esc(n.title)}</b><em>${esc(n.content)}</em><small>${formatLocalDate(noteCreated(n).slice(0, 10))}</small></span></button><button type="button" class="wf-note-hide" data-wf-note-hide="${esc(n.id)}" aria-label="Ẩn ghi chú khỏi trang chủ: ${esc(n.title)}" title="Ẩn khỏi trang chủ (vẫn còn trong Thư viện ghi chú)">${ICON_EYE_OFF}</button><button type="button" class="wf-note-del" data-wf-note-del="${esc(n.id)}" aria-label="Xóa ghi chú: ${esc(n.title)}" title="Xóa ghi chú">×</button></div>`).join("");
   $("wfNotesEmpty").hidden = list.length > 0;
   $("wfNotesEmpty").textContent = !list.length && !wf.q && !wf.nq && notes.some((n) => n.hideHome) ? "Các ghi chú đang được ẩn khỏi trang chủ. Mở Thư viện ghi chú để hiện lại." : "Chưa có ghi chú nào.";
 }
@@ -575,6 +620,18 @@ const listCompare = (a, b) => {
   if (a.done && b.done) return String(b.doneAt || "").localeCompare(String(a.doneAt || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   return (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31");
 };
+// Danh sách "Đã hoàn thành" ở trang chủ: deadline gần hôm nay nhất xếp trước (cùng khoảng cách thì hạn sau xếp trước); không có hạn xuống cuối
+const daysFromToday = (iso) => { const [y, m, d] = iso.split("-").map(Number), [ty, tm, td] = today().split("-").map(Number); return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 864e5); };
+const doneCompare = (a, b) => {
+  if (!a.deadline || !b.deadline) {
+    if (a.deadline || b.deadline) return a.deadline ? -1 : 1;
+  } else {
+    const x = daysFromToday(a.deadline), y = daysFromToday(b.deadline);
+    const diff = Math.abs(x) - Math.abs(y) || y - x;
+    if (diff) return diff;
+  }
+  return String(b.doneAt || "").localeCompare(String(a.doneAt || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+};
 const setTaskDone = (item, done) => { item.done = done; if (done) item.doneAt = new Date().toISOString(); else delete item.doneAt; };
 async function deletePersonalTask(id) {
   const item = personalTasks.find((t) => String(t.id) === String(id));
@@ -644,13 +701,13 @@ function renderNotes() {
   const visible = notes.filter((note) => {
     const matchesSearch = !query || `${note.title} ${note.content} ${note.tag || ""}`.toLocaleLowerCase("vi").includes(query);
     return matchesSearch && (noteFilterMode !== "pinned" || note.pinned) && (tagFilter.value === "all" || note.tag === tagFilter.value);
-  }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  }).sort(noteCompare);
   $("notesGrid").innerHTML = visible.map((note) => {
     const images = Array.isArray(note.images) ? note.images : [];
     const imagePreviews = images.slice(0, 4).map((image) => `<img src="${esc(image.src)}" alt="${esc(image.name || "Ảnh ghi chú")}">`).join("");
     return `
     <article class="note-card note-${["sage", "peach", "blue", "lilac", "yellow"].includes(note.color) ? note.color : "sage"}">
-      <button type="button" class="note-open" data-edit-note="${esc(note.id)}"><span class="note-card-top"><span>${note.tag ? esc(note.tag) : "GHI CHÚ"}${images.length ? ` · ▧ ${images.length}` : ""}${note.hideHome ? " · Đã ẩn ở trang chủ" : ""}</span><span>${formatLocalDate(note.updatedAt)}</span></span><strong>${esc(note.title)}</strong><span class="note-excerpt">${esc(note.content || "Chưa có nội dung")}</span>${imagePreviews ? `<span class="note-card-image-strip">${imagePreviews}</span>` : ""}</button>
+      <button type="button" class="note-open" data-edit-note="${esc(note.id)}"><span class="note-card-top"><span>${note.tag ? esc(note.tag) : "GHI CHÚ"}${images.length ? ` · ▧ ${images.length}` : ""}${note.hideHome ? " · Đã ẩn ở trang chủ" : ""}</span><span>${formatLocalDate(noteCreated(note).slice(0, 10))}</span></span><strong>${esc(note.title)}</strong><span class="note-excerpt">${esc(note.content || "Chưa có nội dung")}</span>${imagePreviews ? `<span class="note-card-image-strip">${imagePreviews}</span>` : ""}</button>
       <div class="note-card-actions"><button type="button" class="note-home ${note.hideHome ? "is-hidden" : ""}" data-toggle-home="${esc(note.id)}" aria-label="${note.hideHome ? "Hiện ở trang chủ" : "Ẩn khỏi trang chủ"}" title="${note.hideHome ? "Hiện ở trang chủ" : "Ẩn khỏi trang chủ"}">${note.hideHome ? ICON_EYE_OFF : ICON_EYE}</button><button type="button" class="note-pin ${note.pinned ? "is-pinned" : ""}" data-toggle-pin="${esc(note.id)}" aria-label="${note.pinned ? "Bỏ ghim" : "Ghim ghi chú"}" title="${note.pinned ? "Bỏ ghim" : "Ghim ghi chú"}">${note.pinned ? "★" : "☆"}</button><button type="button" data-delete-note="${esc(note.id)}" aria-label="Xóa ghi chú" title="Xóa ghi chú">×</button></div>
     </article>`;
   }).join("");
@@ -1090,8 +1147,8 @@ noteForm.addEventListener("submit", (event) => {
   const html = cleanNoteHtml(noteEditor.innerHTML);
   const text = noteHtmlToText(html);
   const values = { title, tag: $("noteTag").value.trim(), content: text, contentHtml: text ? html : "", images: noteDraftImages.slice(), color: $("noteColor").value, pinned: $("notePinned").checked, updatedAt: today() };
-  if (current) Object.assign(current, values);
-  else notes.push({ id: makeLocalId(), ...values });
+  if (current) { if (!current.createdAt) current.createdAt = current.updatedAt || nowLocalIso(); Object.assign(current, values); }
+  else notes.push({ id: makeLocalId(), createdAt: nowLocalIso(), ...values });
   saveNotes();
   noteDialog.close();
   renderNotes();
@@ -1219,12 +1276,27 @@ $("fSearch").addEventListener("input", render);
 document.querySelector(".quick-filters").addEventListener("click", (e) => {
   const button = e.target.closest("[data-quick-filter]");
   if (!button) return;
-  quickFilter = quickFilter === button.dataset.quickFilter ? "" : button.dataset.quickFilter;
+  const name = button.dataset.quickFilter;
+  if (quickFilters.has(name)) quickFilters.delete(name); else quickFilters.add(name);
+  render();
+});
+$("fHideDone").checked = hideDone;
+$("fHideDone").addEventListener("change", (e) => {
+  hideDone = e.target.checked;
+  try { localStorage.setItem(HIDE_DONE_KEY, hideDone ? "1" : "0"); } catch (err) {}
+  render();
+});
+$("quickDateMode").value = dueMode;
+$("quickDateMode").addEventListener("change", (e) => {
+  dueMode = e.target.value === "deadlineCV" ? "deadlineCV" : "deadline";
+  try { localStorage.setItem(DUE_MODE_KEY, dueMode); } catch (err) {}
   render();
 });
 $("btnClear").onclick = () => {
   $("fSearch").value = "";
-  quickFilter = "";
+  quickFilters.clear();
+  hideDone = false; $("fHideDone").checked = false;
+  try { localStorage.setItem(HIDE_DONE_KEY, "0"); } catch (err) {}
   Object.keys(filters).forEach((k) => delete filters[k]);
   closePop();
   render();
@@ -1233,11 +1305,12 @@ $("btnClear").onclick = () => {
 // ===== Thêm / sửa / xóa =====
 const dlg = $("dlg"), form = $("form");
 let editingId = null;
-const nextStt = () => {
-  normalizeSttBank();
-  return sttBank[0] ?? tasks.reduce((max, task) => Math.max(max, Number(task.stt) || 0), 0) + 1;
+// STT kế tiếp trong đúng nhóm: đầu việc cha (parentId rỗng) hoặc các con của một cha
+const nextStt = (parentId = null) => {
+  const key = parentId === null || parentId === undefined || parentId === "" ? "" : String(parentId);
+  return tasks.reduce((max, task) => ((hasParent(task) ? String(task.parentId) : "") === key ? Math.max(max, Number(task.stt) || 0) : max), 0) + 1;
 };
-[form.ngayHop, form.deadline].forEach((field) => {
+[form.ngayHop, form.deadline, form.deadlineCV].forEach((field) => {
   const picker = form.querySelector(`[data-date-picker="${field.name}"]`);
   field.addEventListener("input", () => {
     field.setCustomValidity("");
@@ -1296,7 +1369,7 @@ function openForm(t, requestedParentId = null) {
   $("dlgTitle").textContent = t ? "Sửa công việc" : "Thêm công việc";
   form.reset();
   form.stt.readOnly = !t;
-  const d = t || { stt: nextStt(), dauMoi: [], status: Object.keys(TRANG_THAI)[0], phuTrach: "", parentId: requestedParentId };
+  const d = t || { stt: nextStt(requestedParentId), dauMoi: [], status: Object.keys(TRANG_THAI)[0], phuTrach: "", parentId: requestedParentId };
   renderBoxes(d.dauMoi);
   fillSelect(form.status, "", orderedNames("trangThai"));
   phuAuto = !t;
@@ -1307,14 +1380,16 @@ function openForm(t, requestedParentId = null) {
     `<option value="${esc(parent.id)}">STT ${esc(parent.stt)} · ${esc(String(parent.noiDung).slice(0, 55))}</option>`).join("");
   form.parentId.value = d.parentId == null ? "" : String(d.parentId);
   form.parentId.disabled = hasChildren;
-  ["stt", "maBV", "noiDung", "ghiChu", "ngayHop", "deadline", "status", "versionBuild"]
-    .forEach((k) => { form[k].value = k === "ngayHop" || k === "deadline" ? isoToDisplayDate(d[k]) : d[k] ?? ""; });
+  ["stt", "maBV", "noiDung", "ghiChu", "ngayHop", "deadline", "deadlineCV", "status", "versionBuild"]
+    .forEach((k) => { form[k].value = ["ngayHop", "deadline", "deadlineCV"].includes(k) ? isoToDisplayDate(d[k]) : d[k] ?? ""; });
   renderLinkRows("logYC", toLinks(d.logYC));
   renderLinkRows("bienBan", toLinks(d.bienBan));
   form.querySelector('[data-date-picker="ngayHop"]').value = d.ngayHop || "";
   form.querySelector('[data-date-picker="deadline"]').value = d.deadline || "";
+  form.querySelector('[data-date-picker="deadlineCV"]').value = d.deadlineCV || "";
   form.ngayHop.setCustomValidity("");
   form.deadline.setCustomValidity("");
+  form.deadlineCV.setCustomValidity("");
   form.quiTrinh.checked = !!d.quiTrinh;
   form.querySelector(".grid").scrollTop = 0;
   dlg.showModal();
@@ -1359,8 +1434,9 @@ form.addEventListener("submit", (e) => {
   const logYC = readLinks("logYC"), bienBan = readLinks("bienBan");
   const ngayHop = displayDateToIso(form.ngayHop.value);
   const deadline = displayDateToIso(form.deadline.value);
-  if (ngayHop === null || deadline === null) {
-    const field = ngayHop === null ? form.ngayHop : form.deadline;
+  const deadlineCV = displayDateToIso(form.deadlineCV.value);
+  if (ngayHop === null || deadline === null || deadlineCV === null) {
+    const field = ngayHop === null ? form.ngayHop : deadline === null ? form.deadline : form.deadlineCV;
     field.setCustomValidity("Nhập ngày hợp lệ theo định dạng dd/mm/yyyy.");
     field.reportValidity();
     return;
@@ -1370,12 +1446,14 @@ form.addEventListener("submit", (e) => {
     stt: Number(form.stt.value) || 0,
     dauMoi: [...form.querySelectorAll('[name="dauMoi"]:checked')].map((c) => c.value),
     maBV: form.maBV.value.trim(), noiDung: form.noiDung.value.trim(), ghiChu: form.ghiChu.value.trim(),
-    quiTrinh: form.quiTrinh.checked, ngayHop, deadline,
+    quiTrinh: form.quiTrinh.checked, ngayHop, deadline, deadlineCV,
     parentId: form.parentId.value ? tasks.find((task) => String(task.id) === form.parentId.value)?.id ?? null : null,
     status: form.status.value, phuTrach: selectedPeople(),
     logYC, bienBan, versionBuild: form.versionBuild.value.trim(),
   };
   const i = tasks.findIndex((x) => x.id === t.id);
+  // Việc mới, hoặc đổi cha/độc lập: xếp cuối nhóm mới, renumberTasksByGroup sẽ đánh lại số liền mạch
+  if (i < 0 || String(tasks[i].parentId ?? "") !== String(t.parentId ?? "")) t.stt = 1e9;
   if (i >= 0) {
     const previousStt = Number(tasks[i].stt);
     tasks[i] = t;
@@ -1446,7 +1524,7 @@ function startCellEdit(td) {
   if (td.querySelector(".cell-edit")) return;
   const original = td.innerHTML;
   let el;
-  if (field === "ngayHop" || field === "deadline") {
+  if (field === "ngayHop" || field === "deadline" || field === "deadlineCV") {
     el = document.createElement("input");
     el.type = "date";
     el.value = task[field] || "";
@@ -1545,11 +1623,11 @@ function openChildPicker(parentId) {
     const hasAnotherParent = hasParent(task) && !isCurrentChild;
     if (hasAnotherParent) return false;
     return !tasks.some((child) => String(child.parentId) === String(task.id));
-  }).sort((a, b) => a.stt - b.stt);
+  }).sort((a, b) => sortKey(a) - sortKey(b));
   $("childPickList").innerHTML = candidates.length ? candidates.map((task) => `
     <label class="child-pick-row" title="${esc(task.noiDung)}">
       <input type="checkbox" data-child-id="${esc(task.id)}" ${currentChildren.has(String(task.id)) ? "checked" : ""}>
-      <span><strong>STT ${esc(task.stt)}${task.maBV ? ` · ${esc(task.maBV)}` : ""}</strong><small>${esc(task.noiDung)}</small></span>
+      <span><strong>STT ${esc(sttLabel(task))}${task.maBV ? ` · ${esc(task.maBV)}` : ""}</strong><small>${esc(task.noiDung)}</small></span>
     </label>`).join("") : '<p class="child-pick-empty">Không còn nội dung độc lập để gán.</p>';
   $("childPickSearch").value = "";
   updateChildPickSummary();
@@ -1939,6 +2017,7 @@ const IMPORT_FIELD_ALIASES = {
   quiTrinh: ["quytrinh", "quitrinh"],
   ngayHop: ["ngayhop"],
   deadline: ["deadline", "hannop"],
+  deadlineCV: ["deadlinecv", "handeadlinecv", "deadlinecongviec"],
   status: ["trangthai"],
   phuTrach: ["phutrach"],
   logYC: ["logyeucau", "logyc"],
@@ -2009,7 +2088,8 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
     if (!noiDung) { skippedInvalid++; return; }
     const ngayHop = excelDateToIso(raw("ngayHop"), XLSX);
     const deadline = excelDateToIso(raw("deadline"), XLSX);
-    if (ngayHop === null || deadline === null) { skippedInvalid++; return; }
+    const deadlineCV = excelDateToIso(raw("deadlineCV"), XLSX);
+    if (ngayHop === null || deadline === null || deadlineCV === null) { skippedInvalid++; return; }
     const rawStt = text("stt");
     const numericStt = rawStt ? Number(rawStt) : 0;
     const quiTrinh = raw("quiTrinh");
@@ -2025,7 +2105,7 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
       dauMoi: text("dauMoi").split(/[;,|\n]+/).map((name) => name.trim()).filter(Boolean),
       maBV: text("maBV"), noiDung, ghiChu: text("ghiChu"),
       quiTrinh: typeof quiTrinh === "boolean" ? quiTrinh : ["co", "yes", "true", "1", "x"].includes(quiTrinhText),
-      ngayHop, deadline, status: text("status") || Object.keys(TRANG_THAI)[0] || "",
+      ngayHop, deadline, deadlineCV, status: text("status") || Object.keys(TRANG_THAI)[0] || "",
       phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: toLinks(text("logYC")), bienBan: toLinks(text("bienBan")), versionBuild: text("versionBuild"),
     });
     if (outlineLevel === 0) currentOutlineParent = recordIndex;
@@ -2054,7 +2134,7 @@ $("btnImport").onclick = () => $("importFile").click();
 
 // ===== Tải về Excel: xuất đúng các dòng đang lọc trên lưới (cùng cột và tiêu đề với file Nhập Excel) =====
 const EXPORT_COLS = [
-  { label: "STT", width: 6, value: (t) => t.stt },
+  { label: "STT", width: 6, value: (t) => (hasParent(t) ? sttLabel(t) : t.stt) },
   { label: "Đầu mối", width: 18, value: (t) => (t.dauMoi || []).join(", ") },
   { label: "Mã BV", width: 10, value: (t) => t.maBV || "" },
   { label: "Nội dung theo dõi", width: 60, value: (t) => t.noiDung || "" },
@@ -2062,6 +2142,7 @@ const EXPORT_COLS = [
   { label: "Qui trình", width: 10, value: (t) => (t.quiTrinh ? "Có" : "Chưa") },
   { label: "Ngày họp", width: 12, date: true, value: (t) => t.ngayHop },
   { label: "Deadline", width: 12, date: true, value: (t) => t.deadline },
+  { label: "Deadline CV", width: 12, date: true, value: (t) => t.deadlineCV },
   { label: "Trạng thái", width: 16, value: (t) => t.status || "" },
   { label: "Phụ trách", width: 22, value: (t) => toPeople(t.phuTrach).join(", ") },
   { label: "Log yêu cầu", width: 30, link: true, value: (t) => toLinks(t.logYC).join("\n") },
@@ -2185,7 +2266,7 @@ $("btnImportCommit").addEventListener("click", async () => {
   syncCatOrder();
   save(); saveSttBank(); saveCats();
   $("fSearch").value = "";
-  quickFilter = "";
+  quickFilters.clear();
   Object.keys(filters).forEach((key) => delete filters[key]);
   closePop();
   importDlg.close();

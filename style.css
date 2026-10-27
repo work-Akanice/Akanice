@@ -34,6 +34,8 @@ button.primary:hover{ background: #9c4217; }
 .quick-filters{ display: flex; flex: 0 0 auto; gap: 6px; }
 .quick-filter{ padding: 7px 10px; color: #6b645b; }
 .quick-filter.active{ background: var(--accent); border-color: var(--accent); color: #fff; }
+.filters .hide-done,.filters .due-mode{ display: inline-flex; flex-direction: row; align-items: center; gap: 6px; flex: 0 0 auto; font-weight: 400; color: #6b645b; white-space: nowrap; }
+.filters .due-mode select{ width: auto; padding: 6px 8px; }
 input,select,textarea{
   padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff; width: 100%;
 }
@@ -284,7 +286,7 @@ th{ white-space: nowrap; z-index: 2; }
 #cf p{ margin: 0 0 4px; }
 
 /* ===== Độ rộng cột linh hoạt ===== */
-/* Bảng rộng ra theo cửa sổ; hẹp hơn 2040px thì hiện thanh cuộn ngang ở cuối cửa sổ */table{ table-layout: auto; width: 100%; min-width: 2170px; }
+/* Bảng rộng ra theo cửa sổ; hẹp hơn 2040px thì hiện thanh cuộn ngang ở cuối cửa sổ */table{ table-layout: auto; width: 100%; min-width: 2290px; }
 th:nth-child(1){ min-width: 70px; }
    /* STT */th:nth-child(2){ min-width: 140px; }
   /* Đầu mối */th:nth-child(3){ min-width: 90px; }
@@ -293,12 +295,13 @@ th:nth-child(1){ min-width: 70px; }
   /* Ghi chú */th:nth-child(6){ min-width: 100px; }
   /* Qui trình */th:nth-child(7){ min-width: 120px; }
   /* Ngày họp */th:nth-child(8){ min-width: 120px; }
-  /* Deadline */th:nth-child(9){ min-width: 150px; }
-  /* Trạng thái */th:nth-child(10){ min-width: 120px; }
-  /* Phụ trách */th:nth-child(11){ min-width: 120px; }
-  /* Log yêu cầu */th:nth-child(12){ min-width: 160px; }
-  /* Biên bản làm rõ */th:nth-child(13){ min-width: 130px; }
-  /* Version build */th:nth-child(14){ min-width: 140px; }
+  /* Deadline */th:nth-child(9){ min-width: 120px; }
+  /* Deadline CV */th:nth-child(10){ min-width: 150px; }
+  /* Trạng thái */th:nth-child(11){ min-width: 120px; }
+  /* Phụ trách */th:nth-child(12){ min-width: 120px; }
+  /* Log yêu cầu */th:nth-child(13){ min-width: 160px; }
+  /* Biên bản làm rõ */th:nth-child(14){ min-width: 130px; }
+  /* Version build */th:nth-child(15){ min-width: 140px; }
  /* Nút quan hệ/Sửa/Xóa */
 
 /* ===== Nút icon Sửa / Xóa ===== */.row-actions{ text-align: center; }
