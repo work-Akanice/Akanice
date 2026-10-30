@@ -20,6 +20,7 @@ let TRANG_THAI = {
 let DA_XONG = ["Done"]; // trạng thái coi là đã xong (không tính trễ)
 let PHU_TRACH = [];
 let PT_MAP = {}; // người phụ trách -> [các đầu mối người đó phụ trách]
+let WEEK_START = 1; // ngày bắt đầu tuần (0 = Chủ nhật, 1 = Thứ hai ... 6 = Thứ bảy); chỉnh ở Danh mục > Cài đặt
 
 // ===== Dữ liệu =====
 const KEY = "ql-cong-viec-v1";
@@ -169,6 +170,7 @@ const loadCats = () => {
       TRANG_THAI = c.trangThai || TRANG_THAI;
       DA_XONG = c.daXong || DA_XONG;
       PHU_TRACH = c.phuTrach || [];
+      WEEK_START = Number.isInteger(c.weekStart) && c.weekStart >= 0 && c.weekStart <= 6 ? c.weekStart : 1;
       PT_MAP = {};
       if (c.phuTrachMap && typeof c.phuTrachMap === "object" && !Array.isArray(c.phuTrachMap)) {
         Object.entries(c.phuTrachMap).forEach(([person, list]) => { if (Array.isArray(list)) PT_MAP[person] = list.filter((d) => typeof d === "string"); });
@@ -182,7 +184,7 @@ const loadCats = () => {
   syncCatOrder();
 };
 const saveCats = () => {
-  try { localStorage.setItem(CAT_KEY, JSON.stringify({ dauMoi: DAU_MOI, trangThai: TRANG_THAI, daXong: DA_XONG, phuTrach: PHU_TRACH, phuTrachMap: PT_MAP, order: CAT_ORDER })); } catch (e) {}
+  try { localStorage.setItem(CAT_KEY, JSON.stringify({ dauMoi: DAU_MOI, trangThai: TRANG_THAI, daXong: DA_XONG, phuTrach: PHU_TRACH, phuTrachMap: PT_MAP, weekStart: WEEK_START, order: CAT_ORDER })); } catch (e) {}
 };
 const orderedNames = (type) => {
   const names = type === "dauMoi" ? Object.keys(DAU_MOI) : type === "trangThai" ? Object.keys(TRANG_THAI) : PHU_TRACH.slice();
@@ -302,12 +304,13 @@ const collapsedGroups = new Set();
 let exportRows = []; // các dòng đang được lọc trên lưới (dùng cho nút Tải về)
 const weekRange = (offset) => {
   const [year, month, day] = today().split("-").map(Number);
-  const monday = new Date(year, month - 1, day);
-  monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7 + offset * 7);
-  const sunday = new Date(monday);
-  sunday.setDate(sunday.getDate() + 6);
+  const first = new Date(year, month - 1, day);
+  // lùi về ngày bắt đầu tuần đã cài đặt (WEEK_START), rồi cộng offset tuần
+  first.setDate(first.getDate() - (first.getDay() - WEEK_START + 7) % 7 + offset * 7);
+  const last = new Date(first);
+  last.setDate(last.getDate() + 6);
   const toIso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  return { from: toIso(monday), to: toIso(sunday) };
+  return { from: toIso(first), to: toIso(last) };
 };
 const passesQuickFilter = (task) => {
   if (!quickFilters.size) return true;
@@ -468,10 +471,11 @@ function render() {
   syncFrozenColumns();
 
   $("empty").hidden = list.length > 0;
-  // Bộ đếm theo đầu việc cha: mỗi nhóm cha-con chỉ tính 1
-  const shownCount = new Set(filteredTasks.map((task) => (hasParent(task) && taskById.has(String(task.parentId)) ? String(task.parentId) : String(task.id)))).size;
+  // Bộ đếm chỉ tính yêu cầu cha / yêu cầu độc lập, KHÔNG tính yêu cầu con
+  const shownCount = filteredTasks.filter((task) => !hasParent(task) || !taskById.has(String(task.parentId))).length;
   $("count").innerHTML = `<span class="count-label">Tổng số:</span><strong class="count-total">${shownCount}</strong>`;
   renderHome();
+  if (!$("trackScreen").hidden) renderTrack();
   document.querySelectorAll("[data-quick-filter]").forEach((button) => {
     const active = quickFilters.has(button.dataset.quickFilter);
     button.classList.toggle("active", active);
@@ -482,9 +486,140 @@ function render() {
 const wf = { f: "open", q: "", nq: "" };   // f: d30 (30 ngày) | open | late | done
 const WF_COLORS = { sage: "#6f9c6b", peach: "#f08a4b", yellow: "#e0a826", blue: "#4a82d6", lilac: "#8a63c9" };
 const isoAdd = (iso, n) => { const [y, m, d] = iso.split("-").map(Number), t = new Date(y, m - 1, d + n); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
-const weekStart = (iso) => { const [y, m, d] = iso.split("-").map(Number); return isoAdd(iso, -((new Date(y, m - 1, d).getDay() + 6) % 7)); };
+const weekStart = (iso) => { const [y, m, d] = iso.split("-").map(Number); return isoAdd(iso, -((new Date(y, m - 1, d).getDay() - WEEK_START + 7) % 7)); };
 const dayLabel = (d) => !d ? "Chưa đặt" : d === today() ? "Hôm nay" : d === isoAdd(today(), 1) ? "Ngày mai" : formatLocalDate(d);
 const lc = (v) => String(v ?? "").toLocaleLowerCase("vi");
+
+// ===== Màn hình Theo dõi tiến độ: việc trễ + tuần này + 2 tuần tiếp theo =====
+// Hiện trạng / Tình trạng lưu thẳng vào từng công việc (task.hienTrang, task.tinhTrang) nên được đồng bộ và merge như các ô khác.
+const HIEN_TRANG = [
+  ["Open", "BA log xong nghiệp vụ"],
+  ["In progress", "Dev đang làm"],
+  ["Resolve", "Dev làm xong"],
+  ["Test on develop", "Đang test trên môi trường test"],
+  ["Pass test", "Done trên môi trường test"],
+  ["Ready for stable", "Đã đẩy lên môi trường Stable"],
+  ["Test on stable", "Đang test trên môi trường Stable"],
+  ["Pass stable", "Đợi build Product"],
+];
+const TINH_TRANG = [["Đúng tiến độ", ""], ["Có nguy cơ trễ", ""], ["Trễ deadline", ""], ["Hủy/ Pending", ""]];
+const TRK_GROUPS = [["late", "Trễ hạn"], ["w0", "Tuần này"], ["w1", "Tuần sau"], ["w2", "Tuần sau nữa"]];
+const trk = { f: "all", q: "" };
+
+// Giai đoạn của việc: late | w0 (tuần này) | w1 | w2; null = không thuộc danh sách
+function trackBucket(t) {
+  const due = t.deadline || "";   // màn hình này luôn tính theo cột Deadline của màn Yêu cầu
+  if (!due || isDone(t) || skipsDue(t)) return null;
+  if (due < today()) return "late";
+  for (const [name, offset] of [["w0", 0], ["w1", 1], ["w2", 2]]) if (due <= weekRange(offset).to) return name;
+  return null;
+}
+function trackTasks() {
+  return tasks.map((t) => ({ t, b: trackBucket(t) })).filter((x) => x.b);
+}
+function ticketLabel(url, i, n) {
+  try {
+    const seg = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || "");
+    if (/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(seg)) return seg;   // vd. QLYC-9415
+  } catch (e) {}
+  return n > 1 ? `Link ${i + 1}` : "Mở link";
+}
+function ticketLinks(value) {
+  const list = toLinks(value).filter((u) => /^https?:\/\//i.test(u));
+  return list.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}">${esc(ticketLabel(u, i, list.length))}</a>`).join("");
+}
+function trackSelect(field, task, options) {
+  const cur = task[field] || "";
+  const list = cur && !options.some((o) => o[0] === cur) ? [...options, [cur, ""]] : options;
+  const tip = (list.find((o) => o[0] === cur) || [])[1] || "";
+  return `<select class="trk-sel" data-trk-field="${field}" data-v="${esc(cur)}" title="${esc(tip || cur)}" aria-label="${field === "hienTrang" ? "Hiện trạng" : "Tình trạng"}">`
+    + `<option value="">— Chọn —</option>`
+    + list.map(([name, tipText]) => `<option value="${esc(name)}" title="${esc(tipText)}" ${name === cur ? "selected" : ""}>${esc(name)}</option>`).join("")
+    + `</select>`;
+}
+
+const trkAutoGrow = (el) => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
+function renderTrack() {
+  const all = trackTasks();
+  const count = (b) => all.filter((x) => x.b === b).length;
+  [["trkCntAll", all.length], ["trkCntLate", count("late")], ["trkCntW0", count("w0")], ["trkCntW1", count("w1")], ["trkCntW2", count("w2")]]
+    .forEach(([id, n]) => { $(id).textContent = n; });
+  document.querySelectorAll("[data-trk-filter]").forEach((b) => b.classList.toggle("on", b.dataset.trkFilter === trk.f));
+
+  const q = lc(trk.q);
+  const rows = all.filter(({ t, b }) => (trk.f === "all" || trk.f === b)
+    && (!q || lc([t.noiDung, t.trkGhiChu, t.maBV, t.hienTrang, t.tinhTrang, toPeople(t.phuTrach).join(" ")].join(" ")).includes(q)));
+  rows.sort((x, y) => (x.t.deadline || "").localeCompare(y.t.deadline || "") || sortKey(x.t) - sortKey(y.t));
+
+  const act = document.activeElement;
+  const keep = act && act.classList && act.classList.contains("trk-note-input")
+    ? { id: act.closest("tr").dataset.taskId, value: act.value, start: act.selectionStart, end: act.selectionEnd } : null;
+  let html = "";
+  let seq = 0;   // STT riêng của màn hình này: đếm từ 1 theo thứ tự đang hiển thị
+  TRK_GROUPS.forEach(([name, label]) => {
+    const group = rows.filter((x) => x.b === name);
+    if (!group.length) return;
+    html += `<tr class="trk-group g-${name}"><td colspan="9">${label} <span>${group.length}</span></td></tr>`;
+    html += group.map(({ t, b }) => {
+      const late = b === "late";
+      seq += 1;
+      return `<tr class="trk-row${late ? " is-late" : ""}" data-task-id="${esc(t.id)}">
+        <td class="c">${seq}</td>
+        <td class="c${late ? " trk-red" : ""}">${fmt(t.deadline)}</td>
+        <td class="c cell-editable"${EDIT_ATTRS("deadlineCV", true)}>${fmt(t.deadlineCV)}</td>
+        <td class="trk-person">${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
+        <td class="nd trk-job" title="${esc(t.noiDung)}"><span class="nd-text">${esc(t.noiDung)}</span></td>
+        <td>${trackSelect("hienTrang", t, HIEN_TRANG)}</td>
+        <td>${trackSelect("tinhTrang", t, TINH_TRANG)}</td>
+        <td class="trk-ticket">${ticketLinks(t.logYC)}</td>
+        <td class="trk-note"><textarea class="trk-note-input" rows="1" maxlength="2000" aria-label="Ghi chú" placeholder="Nhập ghi chú…">${esc(t.trkGhiChu || "")}</textarea></td>
+      </tr>`;
+    }).join("");
+  });
+  $("trackRows").innerHTML = html;
+  $("trackRows").querySelectorAll(".trk-note-input").forEach(trkAutoGrow);
+  if (keep) {
+    const tr = [...$("trackRows").querySelectorAll("tr")].find((r) => r.dataset.taskId === keep.id);
+    const box = tr && tr.querySelector(".trk-note-input");
+    if (box) { box.value = keep.value; trkAutoGrow(box); box.focus(); try { box.setSelectionRange(keep.start, keep.end); } catch (e) {} }
+  }
+  $("trackEmpty").hidden = rows.length > 0;
+}
+
+$("trackLegend").innerHTML = HIEN_TRANG.map(([name, tip]) => `<li><b>${esc(name)}</b>: ${esc(tip)}</li>`).join("");
+$("trackSearch").addEventListener("input", (e) => { trk.q = e.target.value.trim(); renderTrack(); });
+$("trackChips").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-trk-filter]");
+  if (b) { trk.f = b.dataset.trkFilter; renderTrack(); }
+});
+$("trackRows").addEventListener("change", (e) => {
+  const sel = e.target.closest("[data-trk-field]");
+  const note = e.target.closest(".trk-note-input");
+  const row = (sel || note) && (sel || note).closest("tr");
+  const task = row && tasks.find((t) => String(t.id) === row.dataset.taskId);
+  if (!task) return;
+  if (note) {   // ghi chú riêng của màn hình này (không lấy từ cột Ghi chú bên Yêu cầu)
+    const v = note.value.trim();
+    if (v) task.trkGhiChu = v; else delete task.trkGhiChu;
+    save();
+    return;
+  }
+  const field = sel.dataset.trkField;
+  if (field !== "hienTrang" && field !== "tinhTrang") return;
+  if (sel.value) task[field] = sel.value; else delete task[field];
+  save();
+  renderTrack();
+});
+$("trackRows").addEventListener("input", (e) => { if (e.target.classList.contains("trk-note-input")) trkAutoGrow(e.target); });
+$("trackRows").addEventListener("keydown", (e) => {
+  if (e.target.classList.contains("trk-note-input") && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.blur(); return; }   // Enter = lưu, Shift+Enter = xuống dòng
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches("td.cell-editable")) { e.preventDefault(); startCellEdit(e.target); }
+});
+// Chỉ ô "Mục tiêu nội bộ" (chọn ngày) và các ô nhập trên lưới sửa được; bấm vào dòng không mở cửa sổ chỉnh sửa yêu cầu
+$("trackRows").addEventListener("click", (e) => {
+  const td = e.target.closest("td.cell-editable");
+  if (td && !e.target.closest("a, button, .cell-edit")) startCellEdit(td);
+});
 
 // công việc có ghi chú chữ hoặc ảnh đính kèm
 const taskHasNote = (item) => Boolean(String(item.noteText || item.note || "").trim() || (Array.isArray(item.images) && item.images.length));
@@ -505,6 +640,7 @@ function renderHome() {
   setCount("portalBoardCount", total, "công việc");
   setCount("portalListCount", openPersonal, "đang mở");
   setCount("portalNotesCount", notes.length, "ghi chú");
+  setCount("portalTrackCount", trackTasks().length, "việc trễ / sắp đến hạn");
   if ($("homeSnapshot")) $("homeSnapshot").textContent = `${total} nhiệm vụ · ${late} cần chú ý`;
 
   // Todo list (công việc cá nhân)
@@ -570,15 +706,17 @@ function renderHome() {
 })();
 
 function showAppView(view, { pushHistory = true } = {}) {
-  if (!["board", "list", "notes"].includes(view)) return;
+  if (!["board", "list", "notes", "track"].includes(view)) return;
   if (pushHistory && history.state?.appView !== view) history.pushState({ appView: view }, "", `#${view}`);
   $("homeScreen").hidden = true;
   $("workspaceScreen").hidden = view !== "board";
   $("listScreen").hidden = view !== "list";
   $("notesScreen").hidden = view !== "notes";
+  $("trackScreen").hidden = view !== "track";
   document.body.classList.toggle("showing-app-screen", view !== "board");
   if (view === "list") renderPersonalTasks();
   if (view === "notes") renderNotes();
+  if (view === "track") renderTrack();
 }
 function showHome({ pushHistory = true } = {}) {
   if (pushHistory && history.state?.appView !== "home") history.pushState({ appView: "home" }, "", "#home");
@@ -586,6 +724,7 @@ function showHome({ pushHistory = true } = {}) {
   $("workspaceScreen").hidden = true;
   $("listScreen").hidden = true;
   $("notesScreen").hidden = true;
+  $("trackScreen").hidden = true;
   document.body.classList.remove("showing-app-screen");
   renderHome();
 }
@@ -594,7 +733,7 @@ document.querySelectorAll("[data-open-view]").forEach((button) => {
 });
 window.addEventListener("popstate", (event) => {
   const view = event.state?.appView;
-  if (view === "board" || view === "list" || view === "notes") showAppView(view, { pushHistory: false });
+  if (view === "board" || view === "list" || view === "notes" || view === "track") showAppView(view, { pushHistory: false });
   else showHome({ pushHistory: false });
 });
 try { history.replaceState({ appView: "home" }, "", "#home"); } catch (error) {}
@@ -1663,6 +1802,7 @@ const MGR_TABS = [
   { key: "dauMoi", label: "Đầu Mối" },
   { key: "trangThai", label: "Trạng Thái" },
   { key: "phuTrach", label: "Người Phụ Trách" },
+  { key: "settings", label: "Cài đặt" },
 ];
 const COLOR_PICKER_VALUES = {
   red: "#fde0e0", yellow: "#fff2b8", green: "#d8f0d4", dark: "#3a2a20",
@@ -1771,6 +1911,24 @@ function renderMgr() {
   };
 
   const currentTab = MGR_TABS.find((tab) => tab.key === activeMgrTab) || MGR_TABS[0];
+  if (currentTab.key === "settings") {
+    const DAY_NAMES = { 1: "Thứ hai", 2: "Thứ ba", 3: "Thứ tư", 4: "Thứ năm", 5: "Thứ sáu", 6: "Thứ bảy", 0: "Chủ nhật" };
+    const thisWeek = weekRange(0), nextWeek = weekRange(1);
+    const dayName = (iso) => { const [y, m, d] = iso.split("-").map(Number); return DAY_NAMES[new Date(y, m - 1, d).getDay()]; };
+    $("mgrBody").innerHTML = `
+    <section class="mgr-section">
+      <h3>Cài đặt tuần</h3>
+      <p class="hint">Quy định một tuần tính từ ngày nào. Dùng cho các bộ lọc "Trong tuần", "Tuần sau" và số liệu "Tuần này", "Tuần tới" ở trang chủ. Cài đặt này dùng chung cho cả nhóm.</p>
+      <label class="week-setting">Tuần bắt đầu từ
+        <select data-act="weekStart">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<option value="${d}" ${d === WEEK_START ? "selected" : ""}>${DAY_NAMES[d]}</option>`).join("")}</select>
+      </label>
+      <ul class="week-preview">
+        <li><b>Tuần này:</b> ${dayName(thisWeek.from)} ${fmt(thisWeek.from)} → ${dayName(thisWeek.to)} ${fmt(thisWeek.to)}</li>
+        <li><b>Tuần sau:</b> ${dayName(nextWeek.from)} ${fmt(nextWeek.from)} → ${dayName(nextWeek.to)} ${fmt(nextWeek.to)}</li>
+      </ul>
+    </section>`;
+    return;
+  }
   const currentItems = orderedEntries(currentTab.key);
 
   const isPerson = currentTab.key === "phuTrach";
@@ -1955,6 +2113,7 @@ $('mgrBody').addEventListener("dragend", (e) => {
 $("mgrBody").addEventListener("change", (e) => {
   const { act, type, name } = e.target.dataset;
   if (act === "rename") renameCat(type, name, e.target.value);
+  else if (act === "weekStart") WEEK_START = Number(e.target.value);
   else if (act === "color") catMap(type)[name] = e.target.value;
   else if (act === "done") {
     DA_XONG = e.target.checked ? [...new Set([...DA_XONG, name])] : DA_XONG.filter((s) => s !== name);

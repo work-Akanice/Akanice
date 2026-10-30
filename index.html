@@ -15,6 +15,7 @@
         <button type="button" class="on" aria-current="page"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg>Trang chủ</button>
         <button type="button" data-open-view="board"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg>Yêu cầu<span class="wf-count" id="portalBoardCount"></span></button>
         <button type="button" data-open-view="list"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg>Lịch làm việc<span class="wf-count" id="portalListCount"></span></button>
+        <button type="button" data-open-view="track"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>Theo dõi tiến độ<span class="wf-count" id="portalTrackCount"></span></button>
         <button type="button" data-open-view="notes"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg>Ghi chú<span class="wf-count" id="portalNotesCount"></span></button>
         <button type="button" id="btnHomeMgr"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg>Danh mục</button>
       </nav>
@@ -107,6 +108,30 @@
       <p id="listEmpty" class="list-empty" hidden>Không có công việc phù hợp với bộ lọc.</p>
     </section>
     <footer class="list-footer"><span id="listFooterCount"></span><span id="listFooterNote">Dữ liệu được lưu trên thiết bị này</span></footer>
+  </main>
+
+  <main id="trackScreen" class="app-screen track-screen" hidden>
+    <header class="track-top">
+      <div class="track-title"><h1>Theo dõi tiến độ</h1></div>
+      <div class="track-tools">
+        <input id="trackSearch" type="search" placeholder="Tìm trong danh sách" aria-label="Tìm trong danh sách">
+      </div>
+    </header>
+    <div class="track-chips" id="trackChips" role="group" aria-label="Lọc theo giai đoạn">
+      <button type="button" class="on" data-trk-filter="all">Tất cả <b id="trkCntAll">0</b></button>
+      <button type="button" data-trk-filter="late">Trễ hạn <b id="trkCntLate">0</b></button>
+      <button type="button" data-trk-filter="w0">Tuần này <b id="trkCntW0">0</b></button>
+      <button type="button" data-trk-filter="w1">Tuần sau <b id="trkCntW1">0</b></button>
+      <button type="button" data-trk-filter="w2">Tuần sau nữa <b id="trkCntW2">0</b></button>
+    </div>
+    <details class="track-legend"><summary>Chú thích cột Hiện trạng</summary><ul id="trackLegend"></ul></details>
+    <div class="track-wrap">
+      <table class="track-table">
+        <thead><tr><th>STT</th><th>Deadline cam kết</th><th>Mục tiêu nội bộ</th><th>Phụ trách</th><th>Công việc</th><th>Hiện trạng</th><th>Tình trạng</th><th>Ticket</th><th>Ghi chú</th></tr></thead>
+        <tbody id="trackRows"></tbody>
+      </table>
+      <p id="trackEmpty" class="track-empty" hidden>Không có việc nào trễ hoặc đến hạn trong tuần này và 2 tuần tới.</p>
+    </div>
   </main>
 
   <main id="notesScreen" class="app-screen notes-screen" hidden>
@@ -230,6 +255,7 @@
       <button type="button" class="mgr-tab active" data-mgr-tab="dauMoi" aria-selected="true">Đầu Mối</button>
       <button type="button" class="mgr-tab" data-mgr-tab="trangThai" aria-selected="false">Trạng Thái</button>
       <button type="button" class="mgr-tab" data-mgr-tab="phuTrach" aria-selected="false">Người Phụ Trách</button>
+      <button type="button" class="mgr-tab" data-mgr-tab="settings" aria-selected="false">Cài đặt</button>
     </div>
     <div id="mgrBody"></div>
     <div class="actions">

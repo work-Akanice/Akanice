@@ -14,6 +14,7 @@
   ];
   const T_SHARED = "shared_state", T_PERSONAL = "app_state", T_MEMBERS = "members";
   const META_KEY = "sb-meta", DEVICE_KEY = "sb-device", BACKUP_KEY = "sb-backup", PENDING_KEY = "sb-pending-keys";
+  const OWNER_KEY = "sb-owner";   // id tài khoản đã dùng trình duyệt này lần gần nhất (để không lẫn dữ liệu cá nhân)
 
   const hasConfig = window.SUPABASE_URL && window.SUPABASE_KEY &&
     !/YOUR-/.test(window.SUPABASE_URL + window.SUPABASE_KEY);
@@ -134,7 +135,7 @@
   // ===== Trạng thái hiển thị =====
   const LABELS = {
     saving: "Đang lưu...", saved: "Đã đồng bộ", offline: "Offline, sẽ đồng bộ khi có mạng",
-    error: "Lỗi đồng bộ", update: "Có cập nhật mới, sẽ tự tải lại (bấm để tải ngay)",
+    error: "Lỗi đồng bộ",
   };
   let state = "saved";
   function setStatus(s) {
@@ -146,19 +147,33 @@
     el.style.cursor = s === "update" ? "pointer" : "";
   }
 
-  let needReload = false;
+  // Báo cho app nạp lại dữ liệu từ localStorage và vẽ lại tại chỗ (không tải lại trang).
+  // Nếu script.js chưa chạy thì không cần báo: lúc chạy nó sẽ đọc thẳng bản mới nhất trong localStorage.
+  function notifyApp(keys) {
+    if (!appLoaded || typeof window.APP_APPLY_REMOTE !== "function") return;
+    try { window.APP_APPLY_REMOTE(keys); } catch (e) { console.error("Không áp dụng được cập nhật từ máy khác:", e); }
+  }
+  // Ghi bản đã merge vào localStorage và ghi nhận "máy này đang dựa trên bản server nào".
+  // Toàn bộ là đồng bộ (không có await) nên không thể chen vào giữa một thao tác lưu của app.
+  function adoptMerged(key, local, merged, metaEntry) {
+    if (merged !== local) nativeSet.call(localStorage, key, merged);
+    meta[key] = metaEntry;
+    persistMeta();
+    if (merged !== local) notifyApp([key]);
+  }
 
   // ===== Dữ liệu CHUNG: đồng bộ 1 key =====
   async function syncShared(key, depth = 0, prefetched) {
     if (depth > 4) throw new Error("Xung đột liên tục, sẽ thử lại");
-    const local = localStorage.getItem(key);
-    const m = meta[key];
     let row = prefetched;
     if (row === undefined || depth > 0) {
       const { data, error } = await sb.from(T_SHARED).select("value,version").eq("key", key).maybeSingle();
       if (error) throw error;
       row = data;
     }
+    // Đọc localStorage SAU khi chờ mạng: nếu người dùng vừa lưu thêm trong lúc chờ thì không bị ghi đè bằng bản cũ
+    const local = localStorage.getItem(key);
+    const m = meta[key];
 
     if (!row) {                                   // server chưa có key này: đưa lên
       if (local === null) return;
@@ -174,10 +189,7 @@
 
     if (!m) {                                     // máy này chưa từng đồng bộ key này: lấy bản của server
       if (local !== null && local !== row.value) backup(key, local);
-      nativeSet.call(localStorage, key, row.value);
-      meta[key] = { v: row.version, base: row.value };
-      persistMeta();
-      if (appLoaded) needReload = true;
+      adoptMerged(key, local, row.value, { v: row.version, base: row.value });
       return;
     }
 
@@ -186,21 +198,13 @@
       return pushShared(key, local, row.version, local, depth);
     }
 
-    // Server đã bị người khác sửa: trộn 3 bên
+    // Server đã bị người khác sửa: trộn 3 bên, ghi bản trộn vào localStorage rồi báo app vẽ lại
     const mine = local === null ? m.base : local;
     const merged = mine === m.base ? row.value : mergeJson(m.base, mine, row.value);
-    if (!appLoaded) {
-      // Lúc khởi động: ghi bản trộn vào localStorage, app sẽ nạp đúng bản này
-      if (merged !== local) nativeSet.call(localStorage, key, merged);
-      if (merged !== row.value) return pushShared(key, merged, row.version, merged, depth);
-      meta[key] = { v: row.version, base: merged };
-      persistMeta();
-      return;
-    }
-    // Đang chạy: bộ nhớ của app đang giữ bản cũ nên KHÔNG ghi đè localStorage.
-    // Chỉ đẩy bản đã trộn lên server rồi tải lại trang để app nạp bản mới.
-    needReload = true;
-    if (merged !== row.value) return pushShared(key, merged, row.version, null, depth);
+    adoptMerged(key, local, merged, { v: row.version, base: row.value });
+    // app có thể vừa sửa lại dữ liệu khi nhận cập nhật (vd. đánh lại STT): đẩy đúng bản hiện tại
+    const toPush = localStorage.getItem(key);
+    if (toPush !== null && toPush !== row.value) return pushShared(key, toPush, row.version, toPush, depth);
   }
 
   async function pushShared(key, value, expectedV, newBase, depth) {
@@ -230,14 +234,14 @@
 
   async function syncPersonal(key, depth = 0, prefetched) {
     if (depth > 4) throw new Error("Xung đột liên tục, sẽ thử lại");
-    const local = localStorage.getItem(key);
-    const m = meta[key];
     let row = prefetched;
     if (row === undefined || depth > 0) {
       const { data, error } = await sb.from(T_PERSONAL).select("value,updated_at").eq("user_id", user.id).eq("key", key).maybeSingle();
       if (error) throw error;
       row = data;
     }
+    const local = localStorage.getItem(key);      // đọc SAU khi chờ mạng (xem chú thích ở syncShared)
+    const m = meta[key];
 
     if (!row) {                                   // server chưa có: đưa lên
       if (local === null) return;
@@ -254,18 +258,14 @@
 
     if (!m) {                                     // máy này chưa từng đồng bộ key này
       if (local === null || local === row.value) {
-        if (local === null) nativeSet.call(localStorage, key, row.value);
-        meta[key] = { u: row.updated_at, base: row.value };
-        persistMeta();
-        if (local === null && appLoaded) needReload = true;
+        adoptMerged(key, local, row.value, { u: row.updated_at, base: row.value });
         return;
       }
       // Cả máy này và server đều có dữ liệu: gộp (không bên nào bị mất), giữ bản máy này để dự phòng
       backup(key, local);
       const merged = mergeJson(emptyBase(local), local, row.value);
-      if (!appLoaded) nativeSet.call(localStorage, key, merged);
-      else needReload = true;
-      return pushPersonalRow(key, merged, row.updated_at, !appLoaded ? merged : null, depth);
+      adoptMerged(key, local, merged, { u: row.updated_at, base: row.value });
+      return pushMergedPersonal(key, row, depth);
     }
 
     if (row.updated_at === m.u) {                 // server không đổi kể từ lần đồng bộ trước
@@ -276,16 +276,15 @@
     // Thiết bị khác đã sửa: trộn 3 bên
     const mine = local === null ? m.base : local;
     const merged = mine === m.base ? row.value : mergeJson(m.base, mine, row.value);
-    if (!appLoaded) {
-      if (merged !== local) nativeSet.call(localStorage, key, merged);
-      if (merged !== row.value) return pushPersonalRow(key, merged, row.updated_at, merged, depth);
-      meta[key] = { u: row.updated_at, base: merged };
-      persistMeta();
-      return;
-    }
-    // Đang chạy: không ghi đè localStorage (app đang giữ bản cũ trong bộ nhớ), đẩy bản trộn rồi tải lại trang
-    needReload = true;
-    if (merged !== row.value) return pushPersonalRow(key, merged, row.updated_at, null, depth);
+    adoptMerged(key, local, merged, { u: row.updated_at, base: row.value });
+    return pushMergedPersonal(key, row, depth);
+  }
+
+  // Đẩy bản hiện tại trong localStorage (sau merge, có thể đã được app chỉnh thêm) nếu khác server
+  function pushMergedPersonal(key, row, depth) {
+    const toPush = localStorage.getItem(key);
+    if (toPush === null || toPush === row.value) return;
+    return pushPersonalRow(key, toPush, row.updated_at, toPush, depth);
   }
 
   async function pushPersonalRow(key, value, expectedU, newBase, depth) {
@@ -309,30 +308,34 @@
     setPending(getPending().filter((k) => isShared(k)));
   }
 
-  // ===== Đẩy dữ liệu khi app lưu =====
+  // ===== Đẩy dữ liệu khi app lưu + kéo thay đổi của người khác về =====
   const dirtyShared = new Set();
+  const pullShared = new Set(), pullPersonal = new Set();   // key phát hiện đã đổi trên server
   let timer = null, flushing = false, rerun = false, retryTimer = null;
 
   async function flush() {
     if (flushing) { rerun = true; return; }
-    const sharedKeys = [...dirtyShared];
-    const personal = getPending().filter((k) => !isShared(k));
-    if (!sharedKeys.length && !personal.length) { if (needReload) scheduleReload(); return; }
+    const sharedKeys = [...new Set([...dirtyShared, ...pullShared])];
+    const personal = [...new Set([...getPending().filter((k) => !isShared(k)), ...pullPersonal])];
+    if (!sharedKeys.length && !personal.length) return;
     if (!navigator.onLine) return setStatus("offline");
     flushing = true;
     setStatus("saving");
     try {
       for (const k of sharedKeys) {
         dirtyShared.delete(k);
+        pullShared.delete(k);
         try { await syncShared(k); } catch (e) { dirtyShared.add(k); throw e; }
       }
       for (const k of personal) {
+        pullPersonal.delete(k);
         const before = localStorage.getItem(k);
         await syncPersonal(k);
-        // chỉ bỏ khỏi hàng chờ nếu trong lúc đồng bộ app không lưu thêm gì
-        if (localStorage.getItem(k) === before) setPending(getPending().filter((x) => x !== k));
+        // bỏ khỏi hàng chờ nếu app không lưu thêm gì trong lúc đồng bộ (bản sau merge cũng tính là đã đẩy xong)
+        const after = localStorage.getItem(k);
+        if (after === before || (meta[k] && after === meta[k].base)) setPending(getPending().filter((x) => x !== k));
       }
-      setStatus(needReload ? "update" : "saved");
+      setStatus("saved");
     } catch (e) {
       console.error("Lỗi đồng bộ Supabase:", e);
       setStatus("error");
@@ -340,40 +343,36 @@
       retryTimer = setTimeout(flush, 15000);
     } finally {
       flushing = false;
-      if (rerun) { rerun = false; flush(); } else if (needReload) scheduleReload();
+      if (rerun) { rerun = false; flush(); }
     }
   }
 
-  // ===== Nhận thay đổi của người khác =====
-  let reloadTimer = null;
-  const busy = () =>
-    !!document.querySelector("dialog[open]") ||
-    /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement && document.activeElement.tagName) || "") ||
-    dirtyShared.size > 0 || getPending().length > 0 || flushing;
-  function scheduleReload() {
-    setStatus("update");
-    clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(tryReload, 1500);
-  }
-  function tryReload() {
-    if (busy()) { reloadTimer = setTimeout(tryReload, 3000); return; }
-    location.reload();
-  }
+  // ===== Nhận thay đổi của người khác: kéo về, merge, vẽ lại tại chỗ =====
+  let checking = false;
   async function checkRemote() {
+    if (checking) return;
+    checking = true;
     try {
       const { data, error } = await sb.from(T_SHARED).select("key,version,device");
-      if (error || !data) return;
-      if (data.some((r) => isShared(r.key) && (meta[r.key] ? meta[r.key].v : 0) < r.version && r.device !== device)) {
-        needReload = true;
-        scheduleReload();
+      if (!error && data) {
+        data.forEach((r) => {
+          if (isShared(r.key) && (meta[r.key] ? meta[r.key].v : 0) < r.version && r.device !== device) pullShared.add(r.key);
+        });
       }
-      if (flushing || getPending().length) return;
-      const { data: pr, error: pe } = await sb.from(T_PERSONAL).select("key,updated_at");
-      if (!pe && pr && pr.some((r) => r.key.startsWith(PREFIX) && !isShared(r.key) && meta[r.key] && meta[r.key].u !== r.updated_at)) {
-        needReload = true;
-        scheduleReload();
+      if (!flushing && !getPending().length) {
+        const { data: pr, error: pe } = await sb.from(T_PERSONAL).select("key,updated_at");
+        if (!pe && pr) {
+          pr.forEach((r) => {
+            if (r.key.startsWith(PREFIX) && !isShared(r.key) && (!meta[r.key] || meta[r.key].u !== r.updated_at)) pullPersonal.add(r.key);
+          });
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      // lỗi mạng: lần kiểm tra sau sẽ thử lại
+    } finally {
+      checking = false;
+    }
+    if (pullShared.size || pullPersonal.size) flush();
   }
   function subscribeRealtime() {
     try {
@@ -413,9 +412,32 @@
     const span = document.createElement("span");
     span.id = "syncStatus";
     span.className = "hint";
-    span.onclick = () => { if (state === "update") location.reload(); };
     top.insertBefore(span, ref);
     setStatus(state);
+  }
+
+  // ===== Gắn dữ liệu cá nhân với tài khoản =====
+  // Nếu trình duyệt này từng dùng bởi tài khoản khác (vd. phiên hết hạn rồi người khác đăng nhập mà không bấm
+  // "Đăng xuất"), dữ liệu cá nhân còn lại trên máy KHÔNG được đẩy sang tài khoản mới: xóa trước khi đồng bộ.
+  // Dữ liệu chung của nhóm thì giữ lại vì mọi thành viên đều được xem.
+  function purgePersonalData() {
+    localKeys().filter((k) => !isShared(k)).forEach((k) => localStorage.removeItem(k));
+    Object.keys(meta).forEach((k) => { if (!isShared(k)) delete meta[k]; });
+    persistMeta();
+    setPending(getPending().filter(isShared));
+    try {
+      const b = JSON.parse(localStorage.getItem(BACKUP_KEY)) || {};
+      Object.keys(b).forEach((k) => { if (k !== "_at" && !isShared(k)) delete b[k]; });
+      nativeSet.call(localStorage, BACKUP_KEY, JSON.stringify(b));
+    } catch (e) { localStorage.removeItem(BACKUP_KEY); }
+  }
+  function bindOwner(userId) {
+    const owner = localStorage.getItem(OWNER_KEY);
+    if (owner && owner !== userId) {
+      console.info("Trình duyệt này đang giữ dữ liệu của tài khoản khác: đã xóa dữ liệu cá nhân cũ.");
+      purgePersonalData();
+    }
+    if (owner !== userId) nativeSet.call(localStorage, OWNER_KEY, userId);
   }
 
   async function signOut() {
@@ -425,7 +447,7 @@
       const ok = window.askYesNo ? await window.askYesNo(msg) : confirm(msg);
       if (!ok) return;
     }
-    [...localKeys(), PENDING_KEY, META_KEY, BACKUP_KEY].forEach((k) => localStorage.removeItem(k));
+    [...localKeys(), PENDING_KEY, META_KEY, BACKUP_KEY, OWNER_KEY].forEach((k) => localStorage.removeItem(k));
     await sb.auth.signOut();
     location.reload();
   }
@@ -486,6 +508,7 @@
     let { data: { session } } = await sb.auth.getSession();
     if (!session) session = await showLogin();
     user = session.user;
+    bindOwner(user.id);   // phải chạy trước khi đồng bộ bất cứ thứ gì
     window.SYNC_USER = String(user.email || "").split("@")[0];
     try {
       const { data: member, error } = await sb.from(T_MEMBERS).select("user_id").eq("user_id", user.id).maybeSingle();
