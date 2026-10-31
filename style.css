@@ -650,7 +650,7 @@ th:nth-child(1){ min-width: 70px; }
 .wf-stats-head,.wf-card-head{display:flex;align-items:center;gap:14px}
 .wf-stats-head p,.wf-card-head p{color:var(--mut);font-size:13px}
 .wf-ico{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:12px;background:#ead9c8;color:#6a4a3a}
-.wf-stats-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr)) auto;align-items:center;margin-top:22px}
+.wf-stats-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr)) auto;align-items:center;margin-top:22px}
 .wf-stat{display:flex;align-items:center;gap:12px;padding:0 18px;border-left:1px solid var(--ln);color:#6a4a3a}
 .wf-stat:first-child{padding-left:0;border:0}
 .wf-stat .i{width:34px;height:34px;padding:7px;border-radius:10px;background:#ece3da}
@@ -664,6 +664,8 @@ th:nth-child(1){ min-width: 70px; }
 .s-violet strong{color:#6a47b0}
 .s-green .i{background:#dcefdc;color:#2f7d4f}
 .s-green strong{color:#2f7d4f}
+.s-amber .i{background:#fbe7c8;color:#b0690f}
+.s-amber strong{color:#a8650f}
 .wf-all,.wf-add{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border:0;border-radius:10px;background:#84583f;color:#fff;font-weight:600;cursor:pointer;white-space:nowrap}
 .wf-all:hover,.wf-add:hover{background:#6f4630}
 .wf-add .i{width:16px;height:16px}
@@ -1095,7 +1097,7 @@ th:nth-child(1){ min-width: 70px; }
  /* gây vạch ngang giữa thẻ */.wf-home .wf-stats-head{ align-items: center; }
 .wf-home .wf-stats-head .wf-all{ margin-left: auto; flex: none; }
 .wf-home .wf-stats-grid{ gap: 14px; }
-@media (min-width: 1201px){.wf-home .wf-stats-grid{ grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (min-width: 1201px){.wf-home .wf-stats-grid{ grid-template-columns: repeat(6, minmax(0, 1fr)); }
  }
 .wf-home .wf-stat{ margin-right: 0; min-height: 72px; padding: 10px 16px; gap: 14px; border: 0; }
 .wf-home .wf-stat:first-child{ padding-left: 16px; background: #f4ede6; }
@@ -1106,6 +1108,8 @@ th:nth-child(1){ min-width: 70px; }
 .wf-home .wf-stat.s-blue{ background: #e9eff9; }
 .wf-home .wf-stat.s-violet{ background: #f1e9f6; }
 .wf-home .wf-stat.s-green{ background: #e9f3ea; }
+.wf-home .wf-stat.s-amber{ background: #fbf1de; }
+.wf-home .wf-stat.s-amber small{ color: #a8650f; }
 .wf-home .wf-stat.s-red small{ color: #d93025; }
 .wf-home .wf-stat.s-blue small{ color: #2f6fd6; }
 .wf-home .wf-stat.s-violet small{ color: #6a47b0; }
@@ -1856,15 +1860,19 @@ button.primary:hover,
 .wf-home .wf-stat,
 .wf-home .wf-stat:first-child,
 .wf-home .wf-stat.s-blue,
+.wf-home .wf-stat.s-amber,
 .wf-home .wf-stat.s-violet{ background: #f8f1e8; border-left-color: #d9c3ab; }
 .wf-home .wf-stat:first-child .i,
 .wf-home .wf-stat.s-blue .i,
+.wf-home .wf-stat.s-amber .i,
 .wf-home .wf-stat.s-violet .i{ background: #f0dcc8; color: #8a5636; }
 .wf-home .wf-stat:first-child strong,
 .wf-home .wf-stat.s-blue strong,
+.wf-home .wf-stat.s-amber strong,
 .wf-home .wf-stat.s-violet strong{ color: var(--ink); }
 .wf-home .wf-stat:first-child small,
 .wf-home .wf-stat.s-blue small,
+.wf-home .wf-stat.s-amber small,
 .wf-home .wf-stat.s-violet small{ color: var(--muted); }
 .wf-home .wf-stat.s-red{ background: #fdf0ed; border-left-color: #e0958d; }
 .wf-home .wf-stat.s-green{ background: #eef6ef; border-left-color: #a3cdb0; }
@@ -1987,8 +1995,8 @@ textarea[name="logYC"],textarea[name="bienBan"]{ resize: vertical; min-height: 6
 .track-legend summary{ cursor: pointer; font-weight: 600; }
 .track-legend ul{ margin: 8px 0 2px; padding-left: 20px; columns: 2; column-gap: 28px; }
 .track-wrap{ overflow: auto; border: 1px solid var(--line); border-top: 4px solid #94684a; border-radius: 12px; background: var(--surface); }
-.track-table{ width: 100%; min-width: 1380px; table-layout: fixed; border-collapse: collapse; color: var(--text); }
-.track-table th{ position: sticky; top: 0; z-index: 2; padding: 10px 10px; border-bottom: 2px solid var(--line); background: #efe2d3; color: #4f3f32; font-size: 14px; font-weight: 800; text-align: center; white-space: nowrap; }
+.track-table{ width: 100%; min-width: 1500px; table-layout: fixed; border-collapse: collapse; color: var(--text); }
+.track-table th{ position: sticky; top: 0; z-index: 2; padding: 10px 6px; border-bottom: 2px solid var(--line); background: #efe2d3; color: #4f3f32; font-size: 14px; font-weight: 800; text-align: center; white-space: nowrap; }
 .track-table td{ padding: 7px 10px; border-bottom: 1px solid #eadfd2; background: var(--surface); font-size: 14px; vertical-align: middle; }
 .track-table td + td{ border-left: 1px solid #f0e6da; }
 .track-table td.c{ text-align: center; white-space: nowrap; }
@@ -2002,13 +2010,17 @@ textarea[name="logYC"],textarea[name="bienBan"]{ resize: vertical; min-height: 6
 .track-table .trk-group.g-w1 td{ background: #d4e8fb; color: #1c5a96; }
 .track-table .trk-group.g-w2 td{ background: #e8d9f7; color: #5f3a8c; }
 .track-table th:nth-child(1){ width: 56px; }
-.track-table th:nth-child(2){ width: 112px; }
-.track-table th:nth-child(3){ width: 130px; }
+.track-table th:nth-child(2){ width: 165px; }
+.track-table th:nth-child(3){ width: 160px; }
 .track-table th:nth-child(4){ width: 120px; }   /* Phụ trách: bằng cột Phụ trách ở màn Yêu cầu */
 .track-table th:nth-child(6),.track-table th:nth-child(7){ width: 160px; }
 .track-table th:nth-child(8){ width: 120px; }
 /* cột Công việc (5) và Ghi chú (9) chia đều phần còn lại */
+.track-table th, .track-table td{ left: auto; }
+.track-table td{ position: static; }
+.track-table th:nth-child(4), .track-table td:nth-child(4){ box-shadow: none; }
 .track-table td.nd{ text-align: left; }
+.track-table tr.trk-row.is-done .nd-text{ color: var(--muted); }
 .track-table td.trk-person{ text-align: left; }
 .track-table td.cell-editable{ cursor: pointer; }
 .track-table td .cell-edit{ min-width: 0; }
@@ -2030,6 +2042,8 @@ textarea[name="logYC"],textarea[name="bienBan"]{ resize: vertical; min-height: 6
 .trk-sel[data-v="Đúng tiến độ"]{ background: #d8f0d4; color: #256b2a; }
 .trk-sel[data-v="Có nguy cơ trễ"]{ background: #ffd9a0; color: #8a4b00; }
 .trk-sel[data-v="Trễ deadline"]{ background: #fde0e0; color: #b3261e; }
+.trk-sel[data-v="Product"]{ background: #fbd5e5; color: #8a1f55; }
+.trk-sel[data-v="Đã xác nhận"]{ background: #bfe9e5; color: #0b5a55; }
 .trk-sel[data-v="Hủy/ Pending"]{ background: #e4e0db; color: #5a5148; }
 .trk-sel option{ background: #fff; color: #26221d; font-weight: 500; }
 .track-empty{ margin: 0; padding: 26px; text-align: center; color: var(--muted); }

@@ -40,7 +40,7 @@
       <section class="wf-stats" aria-label="Tổng quan yêu cầu">
         <div class="wf-stats-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg></span><div><h2>Danh sách yêu cầu</h2><p>Tổng quan tình hình các yêu cầu hiện tại</p></div><button type="button" class="wf-all" data-open-view="board">Xem tất cả <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button></div>
         <div class="wf-stats-grid">
-          <div class="wf-stat "><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg><div><small>Tổng số yêu cầu</small><strong id="wfTotal">0</strong></div></div><div class="wf-stat s-red"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div><small>Quá hạn</small><strong id="wfLate">0</strong></div></div><div class="wf-stat s-blue"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Tuần này</small><strong id="wfWeek">0</strong></div></div><div class="wf-stat s-violet"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Tuần tới</small><strong id="wfNext">0</strong></div></div><div class="wf-stat s-green"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><div><small>Đã hoàn thành</small><strong id="wfDone">0</strong></div></div>
+          <div class="wf-stat "><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg><div><small>Tổng số yêu cầu</small><strong id="wfTotal">0</strong></div></div><div class="wf-stat s-blue"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Đang thực hiện</small><strong id="wfDoing">0</strong></div></div><div class="wf-stat s-red"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div><small>Chưa làm rõ</small><strong id="wfUnclear">0</strong></div></div><div class="wf-stat s-violet"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg><div><small>Hủy/ Pending</small><strong id="wfCancel">0</strong></div></div><div class="wf-stat s-amber"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg><div><small>Chưa quy trình/ Waiting</small><strong id="wfWaiting">0</strong></div></div><div class="wf-stat s-green"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><div><small>Đã hoàn thành</small><strong id="wfDone">0</strong></div></div>
         </div>
       </section>
       <div class="wf-cols">
@@ -127,7 +127,7 @@
     <details class="track-legend"><summary>Chú thích cột Hiện trạng</summary><ul id="trackLegend"></ul></details>
     <div class="track-wrap">
       <table class="track-table">
-        <thead><tr><th>STT</th><th>Deadline cam kết</th><th>Mục tiêu nội bộ</th><th>Phụ trách</th><th>Công việc</th><th>Hiện trạng</th><th>Tình trạng</th><th>Ticket</th><th>Ghi chú</th></tr></thead>
+        <thead id="trackHead"></thead>
         <tbody id="trackRows"></tbody>
       </table>
       <p id="trackEmpty" class="track-empty" hidden>Không có việc nào trễ hoặc đến hạn trong tuần này và 2 tuần tới.</p>

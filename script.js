@@ -325,14 +325,15 @@ const passesQuickFilter = (task) => {
   }
   return false;
 };
-const colOptions = (c) => [...new Set(tasks.flatMap((t) => c.get(t)))].sort((a, b) =>
+const colOptions = (c, src = tasks) => [...new Set(src.flatMap((t) => c.get(t)))].sort((a, b) =>
   c.key === "maBV"
     ? String(a).localeCompare(String(b), "en", { numeric: true, sensitivity: "base" })
     : String(a).localeCompare(String(b), "vi"));
 
-function passes(t) {
-  return COLS.every((c) => {
-    const f = filters[c.key];
+function passes(t) { return passesCols(COLS, filters, t); }
+function passesCols(cols, fobj, t) {
+  return cols.every((c) => {
+    const f = fobj[c.key];
     if (!f) return true;
     const v = c.get(t);
     if (c.type === "list") {
@@ -385,7 +386,7 @@ function render() {
   COLS.forEach((c) => {
     const f = filters[c.key];
     if (f && f.ex) {
-      const opts = colOptions(c);
+      const opts = colOptions(c, popScope === "track" ? trackTasks().map((x) => x.t) : tasks);
       f.ex = new Set([...f.ex].filter((x) => opts.includes(x)));
       if (!f.ex.size) delete filters[c.key];
     }
@@ -501,16 +502,36 @@ const HIEN_TRANG = [
   ["Ready for stable", "Đã đẩy lên môi trường Stable"],
   ["Test on stable", "Đang test trên môi trường Stable"],
   ["Pass stable", "Đợi build Product"],
+  ["Product", "Đã build lên môi trường Product"],
 ];
-const TINH_TRANG = [["Đúng tiến độ", ""], ["Có nguy cơ trễ", ""], ["Trễ deadline", ""], ["Hủy/ Pending", ""]];
+const TINH_TRANG = [["Đúng tiến độ", ""], ["Có nguy cơ trễ", ""], ["Trễ deadline", ""], ["Hủy/ Pending", ""], ["Đã xác nhận", ""]];
 const TRK_GROUPS = [["late", "Trễ hạn"], ["w0", "Tuần này"], ["w1", "Tuần sau"], ["w2", "Tuần sau nữa"]];
 const trk = { f: "all", q: "" };
+// Yêu cầu đã hoàn thành (Done) mặc định hiện trạng "Product" và tình trạng "Đã xác nhận" (chưa chọn gì thì hiển thị mặc định, chọn khác thì giữ lựa chọn)
+const TRK_DONE_DEFAULT = { hienTrang: "Product", tinhTrang: "Đã xác nhận" };
+const trkValue = (t, field) => (t[field] !== undefined ? t[field] : isDone(t) ? TRK_DONE_DEFAULT[field] : "");
+const trkTicketCount = (t) => toLinks(t.logYC).filter((u) => /^https?:\/\//i.test(u)).length;
+// Cột có nút lọc trên lưới (dùng chung hộp lọc với màn Yêu cầu)
+const TRK_COLS = [
+  { key: "deadline", label: "Deadline cam kết", type: "date", get: (t) => t.deadline || "" },
+  { key: "deadlineCV", label: "Mục tiêu nội bộ", type: "date", get: (t) => t.deadlineCV || "" },
+  { key: "phuTrach", label: "Phụ trách", type: "list", get: (t) => (toPeople(t.phuTrach).length ? toPeople(t.phuTrach) : ["(Trống)"]) },
+  { key: "noiDung", label: "Công việc", type: "text", get: (t) => String(t.noiDung ?? "") },
+  { key: "hienTrang", label: "Hiện trạng", type: "list", get: (t) => one(trkValue(t, "hienTrang")) },
+  { key: "tinhTrang", label: "Tình trạng", type: "list", get: (t) => one(trkValue(t, "tinhTrang")) },
+  { key: "ticket", label: "Ticket", type: "list", get: (t) => [trkTicketCount(t) ? "Có link" : "Chưa có"] },
+  { key: "trkGhiChu", label: "Ghi chú", type: "text", get: (t) => String(t.trkGhiChu ?? "") },
+];
+const trkFilters = {};
 
 // Giai đoạn của việc: late | w0 (tuần này) | w1 | w2; null = không thuộc danh sách
 function trackBucket(t) {
   const due = t.deadline || "";   // màn hình này luôn tính theo cột Deadline của màn Yêu cầu
-  if (!due || isDone(t) || skipsDue(t)) return null;
-  if (due < today()) return "late";
+  if (!due || skipsDue(t)) return null;
+  if (isDone(t)) {
+    // việc đã hoàn thành vẫn hiện nếu deadline nằm trong khoảng theo dõi (từ đầu tuần này đến hết tuần sau nữa)
+    if (due < weekRange(0).from) return null;
+  } else if (due < today()) return "late";
   for (const [name, offset] of [["w0", 0], ["w1", 1], ["w2", 2]]) if (due <= weekRange(offset).to) return name;
   return null;
 }
@@ -529,7 +550,7 @@ function ticketLinks(value) {
   return list.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}">${esc(ticketLabel(u, i, list.length))}</a>`).join("");
 }
 function trackSelect(field, task, options) {
-  const cur = task[field] || "";
+  const cur = trkValue(task, field) || "";
   const list = cur && !options.some((o) => o[0] === cur) ? [...options, [cur, ""]] : options;
   const tip = (list.find((o) => o[0] === cur) || [])[1] || "";
   return `<select class="trk-sel" data-trk-field="${field}" data-v="${esc(cur)}" title="${esc(tip || cur)}" aria-label="${field === "hienTrang" ? "Hiện trạng" : "Tình trạng"}">`
@@ -539,7 +560,11 @@ function trackSelect(field, task, options) {
 }
 
 const trkAutoGrow = (el) => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
+function renderTrackHead() {
+  $("trackHead").innerHTML = "<tr><th>STT</th>" + TRK_COLS.map((c) => `<th><div class="th"><span>${c.label}</span><button type="button" class="fbtn ${trkFilters[c.key] ? "on" : ""}" data-col="${c.key}" aria-label="Lọc cột ${c.label}">▾</button></div></th>`).join("") + "</tr>";
+}
 function renderTrack() {
+  renderTrackHead();
   const all = trackTasks();
   const count = (b) => all.filter((x) => x.b === b).length;
   [["trkCntAll", all.length], ["trkCntLate", count("late")], ["trkCntW0", count("w0")], ["trkCntW1", count("w1")], ["trkCntW2", count("w2")]]
@@ -548,7 +573,8 @@ function renderTrack() {
 
   const q = lc(trk.q);
   const rows = all.filter(({ t, b }) => (trk.f === "all" || trk.f === b)
-    && (!q || lc([t.noiDung, t.trkGhiChu, t.maBV, t.hienTrang, t.tinhTrang, toPeople(t.phuTrach).join(" ")].join(" ")).includes(q)));
+    && (!q || lc([t.noiDung, t.trkGhiChu, t.maBV, trkValue(t, "hienTrang"), trkValue(t, "tinhTrang"), toPeople(t.phuTrach).join(" ")].join(" ")).includes(q))
+    && passesCols(TRK_COLS, trkFilters, t));
   rows.sort((x, y) => (x.t.deadline || "").localeCompare(y.t.deadline || "") || sortKey(x.t) - sortKey(y.t));
 
   const act = document.activeElement;
@@ -563,7 +589,7 @@ function renderTrack() {
     html += group.map(({ t, b }) => {
       const late = b === "late";
       seq += 1;
-      return `<tr class="trk-row${late ? " is-late" : ""}" data-task-id="${esc(t.id)}">
+      return `<tr class="trk-row${late ? " is-late" : ""}${isDone(t) ? " is-done" : ""}" data-task-id="${esc(t.id)}">
         <td class="c">${seq}</td>
         <td class="c${late ? " trk-red" : ""}">${fmt(t.deadline)}</td>
         <td class="c cell-editable"${EDIT_ATTRS("deadlineCV", true)}>${fmt(t.deadlineCV)}</td>
@@ -572,7 +598,7 @@ function renderTrack() {
         <td>${trackSelect("hienTrang", t, HIEN_TRANG)}</td>
         <td>${trackSelect("tinhTrang", t, TINH_TRANG)}</td>
         <td class="trk-ticket">${ticketLinks(t.logYC)}</td>
-        <td class="trk-note"><textarea class="trk-note-input" rows="1" maxlength="2000" aria-label="Ghi chú" placeholder="Nhập ghi chú…">${esc(t.trkGhiChu || "")}</textarea></td>
+        <td class="trk-note"><textarea class="trk-note-input" rows="1" maxlength="2000" aria-label="Ghi chú">${esc(t.trkGhiChu || "")}</textarea></td>
       </tr>`;
     }).join("");
   });
@@ -606,7 +632,9 @@ $("trackRows").addEventListener("change", (e) => {
   }
   const field = sel.dataset.trkField;
   if (field !== "hienTrang" && field !== "tinhTrang") return;
-  if (sel.value) task[field] = sel.value; else delete task[field];
+  if (sel.value) task[field] = sel.value;
+  else if (isDone(task)) task[field] = "";   // việc đã xong: để trống thật sự thì không quay về mặc định
+  else delete task[field];
   save();
   renderTrack();
 });
@@ -626,13 +654,15 @@ const taskHasNote = (item) => Boolean(String(item.noteText || item.note || "").t
 
 function renderHome() {
   // số liệu yêu cầu (Bảng công việc)
-  const ws = weekStart(today()), we = isoAdd(ws, 6), ns = isoAdd(ws, 7), ne = isoAdd(ws, 13);
   const roots = rootTasks();   // chỉ đếm đầu việc cha (+ việc độc lập), không đếm việc con
-  const open = roots.filter((t) => !isDone(t) && !skipsDue(t));
-  const inRange = (t, a, b) => { const d = dueOf(t); return d && d >= a && d <= b; };
   const late = roots.filter(isLate).length;
+  const statusIs = (t, name) => plainText(t.status) === plainText(name);
+  const doing = roots.filter((t) => statusIs(t, "Đã rõ yêu cầu") && t.deadline).length;      // Đã rõ yêu cầu và đã có deadline
+  const unclear = roots.filter((t) => statusIs(t, "Chưa làm rõ")).length;
+  const cancelled = roots.filter((t) => /(^|[^a-z])(huy|pending)([^a-z]|$)/.test(plainText(t.status))).length;   // Hủy hoặc Pending
+  const waiting = roots.filter((t) => !t.deadline || /(^|[^a-z])waiting([^a-z]|$)/.test(plainText(t.status))).length;   // chưa có deadline hoặc trạng thái Waiting
   const total = roots.length;   // khớp với bộ đếm "Tổng số" ở màn Yêu cầu (khi chưa lọc)
-  [["wfTotal", total], ["wfLate", late], ["wfWeek", open.filter((t) => inRange(t, ws, we)).length], ["wfNext", open.filter((t) => inRange(t, ns, ne)).length], ["wfDone", roots.filter(isDone).length]]
+  [["wfTotal", total], ["wfDoing", doing], ["wfUnclear", unclear], ["wfCancel", cancelled], ["wfWaiting", waiting], ["wfDone", roots.filter(isDone).length]]
     .forEach(([id, v]) => { $(id).textContent = v; });
   // từ ver2: số đếm trên 3 lối vào + dòng tóm tắt
   const openPersonal = personalTasks.filter((t) => !t.done).length;
@@ -736,6 +766,7 @@ window.addEventListener("popstate", (event) => {
   if (view === "board" || view === "list" || view === "notes" || view === "track") showAppView(view, { pushHistory: false });
   else showHome({ pushHistory: false });
 });
+const INITIAL_VIEW = (() => { const h = String(location.hash || "").slice(1); return ["board", "list", "notes", "track"].includes(h) ? h : "home"; })();
 try { history.replaceState({ appView: "home" }, "", "#home"); } catch (error) {}
 
 const formatLocalDate = (value) => {
@@ -1335,17 +1366,19 @@ pop.id = "pop";
 pop.hidden = true;
 document.body.appendChild(pop);
 let popCol = null;
+let popScope = "board";   // hộp lọc đang phục vụ bảng nào: "board" (Yêu cầu) hoặc "track" (Theo dõi tiến độ)
 const closePop = () => { pop.hidden = true; popCol = null; };
-const colOf = (key) => COLS.find((c) => c.key === key);
+const colOf = (key) => (popScope === "track" ? TRK_COLS : COLS).find((c) => c.key === key);
 
 function setFilter(key, f) {
-  if (f) filters[key] = f; else delete filters[key];
-  render();
+  const target = popScope === "track" ? trkFilters : filters;
+  if (f) target[key] = f; else delete target[key];
+  if (popScope === "track") renderTrack(); else render();
 }
 
 function openPop(btn, key) {
   if (!pop.hidden && popCol === key) return closePop();
-  const c = colOf(key), f = filters[key];
+  const c = colOf(key), f = (popScope === "track" ? trkFilters : filters)[key];
   popCol = key;
   let body;
   if (c.type === "list") {
@@ -1405,6 +1438,14 @@ $("head").addEventListener("click", (e) => {
   const b = e.target.closest(".fbtn");
   if (!b) return;
   e.stopPropagation();
+  popScope = "board";
+  openPop(b, b.dataset.col);
+});
+$("trackHead").addEventListener("click", (e) => {
+  const b = e.target.closest(".fbtn");
+  if (!b) return;
+  e.stopPropagation();
+  popScope = "track";
   openPop(b, b.dataset.col);
 });
 document.addEventListener("click", (e) => { if (!pop.hidden && !pop.contains(e.target)) closePop(); });
@@ -2205,6 +2246,7 @@ function ensureXlsx() {
 function excelDateToIso(value, XLSX) {
   if (value === "" || value === null || value === undefined) return "";
   const toIso = (year, month, day) => `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const valid = (y, m, d) => { const dt = new Date(y, m - 1, d); return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d; };
   if (value instanceof Date && !Number.isNaN(value.getTime())) return toIso(value.getFullYear(), value.getMonth() + 1, value.getDate());
   if (typeof value === "number") {
     const date = XLSX.SSF.parse_date_code(value);
@@ -2212,19 +2254,68 @@ function excelDateToIso(value, XLSX) {
     return null;
   }
   const text = String(value).trim();
+  if (!text) return "";
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
-  if (iso) return toIso(iso[1], iso[2], iso[3]);
-  const local = /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/.exec(text);
-  if (local) return displayDateToIso(`${local[1].padStart(2, "0")}/${local[2].padStart(2, "0")}/${local[3]}`);
+  if (iso && valid(+iso[1], +iso[2], +iso[3])) return toIso(iso[1], iso[2], iso[3]);
+  // 30/10/2026, 30-10-26, 30.10 (thiếu năm thì lấy năm hiện tại), hoặc có chữ kèm theo như "30/10/2026 (dự kiến)"
+  const local = /^(\d{1,2})[/.\-](\d{1,2})(?:[/.\-](\d{4}|\d{2}))?$/.exec(text) || /(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})/.exec(text);
+  if (local) {
+    const d = +local[1], m = +local[2];
+    let y = local[3] ? +local[3] : new Date().getFullYear();
+    if (y < 100) y += 2000;
+    if (valid(y, m, d)) return toIso(y, m, d);
+  }
   return null;
 }
 
-function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
+// Nhận diện tiêu đề cột: khớp đúng tên trước, không khớp thì dò theo từ khóa (chịu được tên dài/khác chữ như "Biên bản làm rõ yêu cầu", "Quy trình ban hành")
+const IMPORT_RULES = [
+  ["deadlineCV", (h) => (h.includes("deadline") && /(cv|congviec|noibo)/.test(h)) || h.includes("muctieu")],
+  ["deadline", (h) => h.includes("deadline") || h === "hannop"],
+  ["logYC", (h) => /^log/.test(h) || h.includes("ticket") || h.includes("linklog")],
+  ["bienBan", (h) => h.includes("bienban") || h.includes("lamro")],
+  ["versionBuild", (h) => h.includes("version") || h.includes("build") || h.includes("phienban")],
+  ["quiTrinh", (h) => h.includes("quytrinh") || h.includes("quitrinh")],
+  ["ngayHop", (h) => h.includes("ngayhop")],
+  ["ghiChu", (h) => h.includes("ghichu")],
+  ["noiDung", (h) => h.includes("noidung") || h.includes("tencongviec") || h === "congviec"],
+  ["phuTrach", (h) => h.includes("phutrach")],
+  ["dauMoi", (h) => h.includes("daumoi")],
+  ["maBV", (h) => h === "mabv" || h.includes("mabenhvien")],
+  ["status", (h) => h.includes("trangthai")],
+  ["stt", (h) => h === "stt" || h === "sothutu" || h === "tt"],
+];
+function importKeyOf(cell) {
+  const h = normalizedImportHeader(cell);
+  if (!h) return null;
+  const exact = IMPORT_HEADER_KEYS.get(h);
+  if (exact) return exact;
+  const rule = IMPORT_RULES.find(([, test]) => test(h));
+  return rule ? rule[0] : null;
+}
+const IMPORT_LABELS = { deadlineCV: "Deadline CV", logYC: "Log yêu cầu", bienBan: "Biên bản làm rõ", versionBuild: "Version build", quiTrinh: "Qui trình" };
+
+// Ô "Qui trình": tick (✓/x/1/TRUE) hoặc chữ như "Có", "Đã có"... là Có; trống, "Chưa", "Không", "Đang..." là Chưa
+function parseQuiTrinhCell(cell) {
+  if (!cell) return false;
+  const v = cell.v;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const text = String(v ?? "").trim();
+  if (!text) return false;
+  if (/[✓✔☑√]/.test(text)) return true;
+  const h = normalizedImportHeader(text);
+  if (!h) return false;
+  if (/^(chua|khong|dang|cho)/.test(h) || /^(ko|false|0|n|na|no)$/.test(h)) return false;
+  return true;
+}
+
+function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0, sheet = {}, colStart = 0) {
   let headerIndex = -1, columns = {}, bestScore = 0;
-  rows.slice(0, 20).forEach((row, index) => {
+  rows.slice(0, 30).forEach((row, index) => {
     const candidate = {};
     row.forEach((cell, columnIndex) => {
-      const key = IMPORT_HEADER_KEYS.get(normalizedImportHeader(cell));
+      const key = importKeyOf(cell);
       if (key && candidate[key] === undefined) candidate[key] = columnIndex;
     });
     const score = Object.keys(candidate).length;
@@ -2235,25 +2326,62 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
     }
   });
   if (headerIndex < 0) throw new Error("Không tìm thấy hàng tiêu đề có cột Nội dung theo dõi.");
+  const unknownHeaders = (rows[headerIndex] || []).map((cell, i) => ({ cell: String(cell ?? "").trim(), i }))
+    .filter(({ cell, i }) => cell && !Object.values(columns).includes(i)).map(({ cell }) => cell);
 
-  let skippedEmpty = 0, skippedInvalid = 0;
+  // Ô gộp (merge): các dòng bên dưới ô gộp dùng giá trị của ô trên cùng (trừ STT và Nội dung)
+  const mergeAt = new Map();
+  (sheet["!merges"] || []).forEach((m) => {
+    if ((m.e.r - m.s.r + 1) * (m.e.c - m.s.c + 1) > 5000) return;
+    for (let r = m.s.r; r <= m.e.r; r++) for (let c = m.s.c; c <= m.e.c; c++) if (r !== m.s.r || c !== m.s.c) mergeAt.set(`${r},${c}`, { r: m.s.r, c: m.s.c });
+  });
+  const cellOf = (key, rowAbs) => {
+    if (columns[key] === undefined) return null;
+    let r = rowAbs, c = colStart + columns[key];
+    const m = key !== "noiDung" && key !== "stt" ? mergeAt.get(`${r},${c}`) : null;
+    if (m) { r = m.r; c = m.c; }
+    return sheet[XLSX.utils.encode_cell({ r, c })] || null;
+  };
+  // chữ hiển thị đúng như trong Excel (vd. version "1.10" không bị thành 1.1)
+  const shownOf = (cell) => {
+    if (!cell) return "";
+    if ((cell.t === "n" || cell.v instanceof Date) && cell.w) return String(cell.w).trim();
+    return String(cell.v ?? "").trim();
+  };
+  // link: lấy từ siêu liên kết của ô, công thức HYPERLINK(...), hoặc địa chỉ http(s) gõ thẳng trong ô
+  const linksOf = (cell) => {
+    const urls = [];
+    const add = (u) => { const url = String(u || "").trim().replace(/[),.;]+$/, ""); if (/^https?:\/\//i.test(url) && !urls.includes(url)) urls.push(url); };
+    if (!cell) return urls;
+    if (cell.l && cell.l.Target) add(cell.l.Target);
+    if (typeof cell.f === "string") for (const m of cell.f.matchAll(/HYPERLINK\(\s*"([^"]+)"/gi)) add(m[1]);
+    (`${cell.v ?? ""} ${cell.w ?? ""}`.match(/https?:\/\/[^\s;|"<>]+/gi) || []).forEach(add);
+    return urls;
+  };
+
+  let skippedEmpty = 0, skippedInvalid = 0, unreadableDates = 0, linkTextOnly = 0;
   const records = [];
   let currentOutlineParent = null;
   rows.slice(headerIndex + 1).forEach((row, offset) => {
     if (!row.some((cell) => String(cell ?? "").trim())) { skippedEmpty++; return; }
-    const raw = (key) => columns[key] === undefined ? "" : row[columns[key]] ?? "";
-    const text = (key) => String(raw(key) ?? "").trim();
+    const rowIndex = rowStart + headerIndex + offset + 1;
+    const text = (key) => shownOf(cellOf(key, rowIndex));
     const noiDung = text("noiDung");
     if (!noiDung) { skippedInvalid++; return; }
-    const ngayHop = excelDateToIso(raw("ngayHop"), XLSX);
-    const deadline = excelDateToIso(raw("deadline"), XLSX);
-    const deadlineCV = excelDateToIso(raw("deadlineCV"), XLSX);
-    if (ngayHop === null || deadline === null || deadlineCV === null) { skippedInvalid++; return; }
-    const rawStt = text("stt");
+    const dateOf = (key) => {
+      const cell = cellOf(key, rowIndex);
+      const iso = excelDateToIso(cell ? cell.v : "", XLSX);
+      if (iso === null) { unreadableDates++; return ""; }   // không đọc được ngày thì để trống, vẫn giữ dòng
+      return iso;
+    };
+    const linkField = (key) => {
+      const cell = cellOf(key, rowIndex);
+      const urls = linksOf(cell);
+      if (!urls.length && shownOf(cell)) linkTextOnly++;
+      return urls;
+    };
+    const rawStt = String(cellOf("stt", rowIndex)?.v ?? "").trim();
     const numericStt = rawStt ? Number(rawStt) : 0;
-    const quiTrinh = raw("quiTrinh");
-    const quiTrinhText = normalizedImportHeader(quiTrinh);
-    const rowIndex = rowStart + headerIndex + offset + 1;
     const outlineLevel = Number(outlineRows[rowIndex]?.level) || 0;
     const parentIndex = outlineLevel > 0 && currentOutlineParent !== null ? currentOutlineParent : null;
     const recordIndex = records.length;
@@ -2263,14 +2391,23 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0) {
       parentIndex,
       dauMoi: text("dauMoi").split(/[;,|\n]+/).map((name) => name.trim()).filter(Boolean),
       maBV: text("maBV"), noiDung, ghiChu: text("ghiChu"),
-      quiTrinh: typeof quiTrinh === "boolean" ? quiTrinh : ["co", "yes", "true", "1", "x"].includes(quiTrinhText),
-      ngayHop, deadline, deadlineCV, status: text("status") || Object.keys(TRANG_THAI)[0] || "",
-      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: toLinks(text("logYC")), bienBan: toLinks(text("bienBan")), versionBuild: text("versionBuild"),
+      quiTrinh: parseQuiTrinhCell(cellOf("quiTrinh", rowIndex)),
+      ngayHop: dateOf("ngayHop"), deadline: dateOf("deadline"), deadlineCV: dateOf("deadlineCV"),
+      status: text("status") || Object.keys(TRANG_THAI)[0] || "",
+      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: linkField("logYC"), bienBan: linkField("bienBan"), versionBuild: text("versionBuild"),
     });
     if (outlineLevel === 0) currentOutlineParent = recordIndex;
   });
+  const counts = {
+    deadlineCV: records.filter((r) => r.deadlineCV).length,
+    logYC: records.filter((r) => r.logYC.length).length,
+    bienBan: records.filter((r) => r.bienBan.length).length,
+    versionBuild: records.filter((r) => r.versionBuild).length,
+    quiTrinh: records.filter((r) => r.quiTrinh).length,
+  };
   return {
-    records, skippedEmpty, skippedInvalid, headerIndex, mappedColumns: bestScore,
+    records, skippedEmpty, skippedInvalid, headerIndex, mappedColumns: bestScore, counts, unreadableDates, linkTextOnly, unknownHeaders,
+    missingColumns: Object.keys(IMPORT_LABELS).filter((key) => columns[key] === undefined).map((key) => IMPORT_LABELS[key]),
     groupedChildren: records.filter((record) => record.parentIndex !== null).length,
   };
 }
@@ -2280,7 +2417,15 @@ function showImportPreview(fileName, sheetName, result) {
   $("importFileName").textContent = `${fileName} · ${sheetName}`;
   $("importStatus").textContent = result.records.length ? "" : "Không có dòng hợp lệ để nhập.";
   $("importStatus").classList.toggle("error", !result.records.length);
-  $("importSummary").textContent = `Tìm thấy ${result.records.length} công việc, nhận diện ${result.groupedChildren} nội dung con từ nhóm hàng Excel · Bỏ qua ${result.skippedEmpty} dòng trống và ${result.skippedInvalid} dòng không hợp lệ.`;
+  const c = result.counts || {};
+  $("importSummary").textContent = [
+    `Tìm thấy ${result.records.length} công việc, nhận diện ${result.groupedChildren} nội dung con từ nhóm hàng Excel · Bỏ qua ${result.skippedEmpty} dòng trống và ${result.skippedInvalid} dòng không hợp lệ.`,
+    `Đọc được: Deadline CV ${c.deadlineCV ?? 0}, Log yêu cầu ${c.logYC ?? 0}, Biên bản làm rõ ${c.bienBan ?? 0}, Version build ${c.versionBuild ?? 0}, Qui trình "Có" ${c.quiTrinh ?? 0}.`,
+    result.missingColumns?.length ? `Không tìm thấy cột: ${result.missingColumns.join(", ")}.` : "",
+    result.unknownHeaders?.length ? `Tiêu đề chưa nhận diện (bỏ qua): ${result.unknownHeaders.join(", ")}.` : "",
+    result.unreadableDates ? `${result.unreadableDates} ô ngày không đọc được nên để trống.` : "",
+    result.linkTextOnly ? `${result.linkTextOnly} ô Log/Biên bản chỉ có chữ, không có đường link nên không lấy được.` : "",
+  ].filter(Boolean).join(" ");
   $("importPreviewRows").innerHTML = result.records.slice(0, 8).map((task) => `
     <tr><td>${task.stt ?? "Tự cấp"}</td><td>${esc(task.maBV)}</td><td>${task.parentIndex !== null ? "↳ " : ""}${esc(task.noiDung)}</td><td>${fmt(task.deadline)}</td><td>${esc(task.status)}</td></tr>`).join("");
   $("importPreview").hidden = false;
@@ -2359,7 +2504,8 @@ $("importFile").addEventListener("change", async (e) => {
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "", blankrows: true });
     const rowStart = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]).s.r : 0;
-    showImportPreview(file.name, sheetName, parseExcelRows(rows, XLSX, sheet["!rows"] || [], rowStart));
+    const colStart = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]).s.c : 0;
+    showImportPreview(file.name, sheetName, parseExcelRows(rows, XLSX, sheet["!rows"] || [], rowStart, sheet, colStart));
   } catch (error) {
     $("importStatus").textContent = error.message || "Không đọc được tệp Excel.";
     $("importStatus").classList.add("error");
@@ -2471,3 +2617,6 @@ function applyRemoteChanges(keys) {
   if (mgr.open && has(CAT_KEY, KEY) && !$("mgrBody").contains(document.activeElement)) renderMgr();
 }
 window.APP_APPLY_REMOTE = applyRemoteChanges;
+
+// Tải lại trang (F5 / nút reload): ở lại đúng màn hình đang xem (theo #view trên địa chỉ), chỉ làm mới dữ liệu
+if (INITIAL_VIEW !== "home") showAppView(INITIAL_VIEW);
