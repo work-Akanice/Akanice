@@ -49,6 +49,7 @@ const normalizePeople = () => tasks.forEach((t) => {
   t.phuTrach = toPeople(t.phuTrach);
   t.logYC = toLinks(t.logYC);
   t.bienBan = toLinks(t.bienBan);
+  t.bbNghiemThu = toLinks(t.bbNghiemThu);
 });
 // Bộ đếm theo ĐẦU VIỆC CHA: chỉ tính việc độc lập + việc cha, không tính việc con
 const rootTasks = () => tasks.filter((task) => !hasParent(task));
@@ -292,6 +293,7 @@ const COLS = [
   { key: "phuTrach", label: "Phụ trách", type: "list", get: (t) => (toPeople(t.phuTrach).length ? toPeople(t.phuTrach) : ["(Trống)"]) },
   { key: "logYC", label: "Log yêu cầu", type: "list", get: (t) => [toLinks(t.logYC).length ? "Có link" : "Chưa có"] },
   { key: "bienBan", label: "Biên bản làm rõ", type: "list", get: (t) => [toLinks(t.bienBan).length ? "Có link" : "Chưa có"] },
+  { key: "bbNghiemThu", label: "BB nghiệm thu", type: "list", get: (t) => [toLinks(t.bbNghiemThu).length ? "Có link" : "Chưa có"] },
   { key: "versionBuild", label: "Version build", type: "list", get: (t) => one(t.versionBuild) },
 ];
 const filters = {}; // key -> { ex:Set } (list) | { text } (text) | { from, to } (date)
@@ -369,14 +371,14 @@ function renderHead() {
     </th>`).join("") + "<th>Thao tác</th></tr>";
 }
 
-function syncFrozenColumns() {
-  const headers = [...$("head").querySelectorAll("th")].slice(0, 4);
+function syncFrozenColumns(headEl = $("head"), rowsEl = $("rows")) {
+  const headers = [...headEl.querySelectorAll("th")].slice(0, 4);
   let left = 0;
   headers.forEach((header, index) => {
     const column = index + 1;
     const offset = `${left}px`;
     header.style.left = offset;
-    $("rows").querySelectorAll(`td:nth-child(${column})`).forEach((cell) => { cell.style.left = offset; });
+    rowsEl.querySelectorAll(`td:nth-child(${column})`).forEach((cell) => { cell.style.left = offset; });
     left += header.getBoundingClientRect().width;
   });
 }
@@ -386,7 +388,7 @@ function render() {
   COLS.forEach((c) => {
     const f = filters[c.key];
     if (f && f.ex) {
-      const opts = colOptions(c, popScope === "track" ? trackTasks().map((x) => x.t) : tasks);
+      const opts = colOptions(c);
       f.ex = new Set([...f.ex].filter((x) => opts.includes(x)));
       if (!f.ex.size) delete filters[c.key];
     }
@@ -460,6 +462,7 @@ function render() {
       <td${EDIT_ATTRS("phuTrach")}>${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
       <td class="c">${links(t.logYC)}</td>
       <td class="c">${links(t.bienBan)}</td>
+      <td class="c">${links(t.bbNghiemThu)}</td>
       <td class="c">${esc(t.versionBuild)}</td>
       <td class="row-actions">
         ${!parent ? `<button type="button" class="icon-btn" data-add-child="${esc(t.id)}" title="Thêm nội dung con" aria-label="Thêm nội dung con">${ICON_CHILD}</button>` : ""}
@@ -473,7 +476,8 @@ function render() {
 
   $("empty").hidden = list.length > 0;
   // Bộ đếm chỉ tính yêu cầu cha / yêu cầu độc lập, KHÔNG tính yêu cầu con
-  const shownCount = filteredTasks.filter((task) => !hasParent(task) || !taskById.has(String(task.parentId))).length;
+  const rootKeyOf = (task) => (hasParent(task) && taskById.has(String(task.parentId)) ? String(task.parentId) : String(task.id));
+  const shownCount = new Set(filteredTasks.map(rootKeyOf)).size;
   $("count").innerHTML = `<span class="count-label">Tổng số:</span><strong class="count-total">${shownCount}</strong>`;
   renderHome();
   if (!$("trackScreen").hidden) renderTrack();
@@ -528,10 +532,9 @@ const trkFilters = {};
 function trackBucket(t) {
   const due = t.deadline || "";   // màn hình này luôn tính theo cột Deadline của màn Yêu cầu
   if (!due || skipsDue(t)) return null;
-  if (isDone(t)) {
-    // việc đã hoàn thành vẫn hiện nếu deadline nằm trong khoảng theo dõi (từ đầu tuần này đến hết tuần sau nữa)
-    if (due < weekRange(0).from) return null;
-  } else if (due < today()) return "late";
+  // Mốc tuần lấy theo "Tuần bắt đầu từ" trong Danh mục > Cài đặt (weekRange), không theo ngày thực tế:
+  // Trễ hạn = deadline trước ngày bắt đầu của tuần hiện tại; Tuần này / Tuần sau / Tuần sau nữa = đúng 3 tuần liền kề theo cài đặt
+  if (due < weekRange(0).from) return isDone(t) ? null : "late";   // việc đã xong có deadline cũ hơn tuần này thì không hiện
   for (const [name, offset] of [["w0", 0], ["w1", 1], ["w2", 2]]) if (due <= weekRange(offset).to) return name;
   return null;
 }
@@ -652,18 +655,65 @@ $("trackRows").addEventListener("click", (e) => {
 // công việc có ghi chú chữ hoặc ảnh đính kèm
 const taskHasNote = (item) => Boolean(String(item.noteText || item.note || "").trim() || (Array.isArray(item.images) && item.images.length));
 
+// Các thẻ thống kê trang chủ: nhãn + điều kiện (tính trên yêu cầu cha / độc lập). Bấm thẻ để xem danh sách tương ứng.
+const statusIs = (t, name) => plainText(t.status) === plainText(name);
+const HOME_STATS = {
+  wfTotal: { label: "Tổng số yêu cầu", test: () => true },
+  wfDoing: { label: "Đang thực hiện", test: (t) => statusIs(t, "Đã rõ yêu cầu") && !!t.deadline },   // Đã rõ yêu cầu và đã có deadline
+  wfUnclear: { label: "Chưa làm rõ", test: (t) => statusIs(t, "Chưa làm rõ") },
+  wfCancel: { label: "Hủy/ Pending", test: (t) => /(^|[^a-z])(huy|pending)([^a-z]|$)/.test(plainText(t.status)) },
+  wfWaiting: { label: "Chưa quy trình/ Waiting", test: (t) => !t.deadline || /(^|[^a-z])waiting([^a-z]|$)/.test(plainText(t.status)) },
+  wfDone: { label: "Đã hoàn thành", test: (t) => isDone(t) },
+};
+let statCurrent = "wfTotal";
+const statItems = () => rootTasks().filter(HOME_STATS[statCurrent].test).sort((a, b) => sortKey(a) - sortKey(b));
+function statRowHtml(t) {
+  const childCount = tasks.filter((x) => hasParent(x) && String(x.parentId) === String(t.id)).length;
+  const relation = childCount ? `<span class="task-relation">Yêu cầu chính - ${childCount}</span> ` : "";
+  return `<tr class="${isLate(t) ? "late" : ""}">
+      <td class="c">${esc(t.stt)}</td>
+      <td>${(t.dauMoi || []).map((d) => tag(d, DAU_MOI[d] || "grey")).join("")}</td>
+      <td class="c">${esc(t.maBV)}</td>
+      <td class="nd" title="${esc(t.noiDung)}"><span class="tree-cell"><span class="tree-spacer" aria-hidden="true"></span><span class="tree-content">${relation}<span class="nd-text">${esc(t.noiDung)}</span></span></span></td>
+      <td class="nd" title="${esc(t.ghiChu)}"><span class="nd-text">${esc(t.ghiChu)}</span></td>
+      <td class="c"><input type="checkbox" class="qt" disabled ${t.quiTrinh ? "checked" : ""} aria-label="Qui trình"></td>
+      <td class="c">${fmt(t.ngayHop)}</td>
+      <td class="c">${fmt(t.deadline)}</td>
+      <td class="c">${fmt(t.deadlineCV)}</td>
+      <td>${tag(t.status, TRANG_THAI[t.status] || "grey")}</td>
+      <td>${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
+      <td class="c">${links(t.logYC)}</td>
+      <td class="c">${links(t.bienBan)}</td>
+      <td class="c">${links(t.bbNghiemThu)}</td>
+      <td class="c">${esc(t.versionBuild)}</td>
+    </tr>`;
+}
+function renderStatDlg() {
+  const items = statItems();
+  $("statTitle").textContent = HOME_STATS[statCurrent].label;
+  $("statCount").innerHTML = `<span class="count-label">Tổng số:</span> <strong class="count-total">${items.length}</strong>`;
+  $("statHead").innerHTML = "<tr>" + COLS.map((c) => `<th class="${c.wide ? "wide" : ""}"><div class="th"><span>${c.label}</span></div></th>`).join("") + "</tr>";
+  $("statRows").innerHTML = items.map(statRowHtml).join("");
+  $("statEmpty").hidden = items.length > 0;
+  $("btnStatExport").disabled = !items.length;
+  syncFrozenColumns($("statHead"), $("statRows"));
+}
+function openStatDlg(id) {
+  if (!HOME_STATS[id]) return;
+  statCurrent = id;
+  if (!$("statDlg").open) $("statDlg").showModal();
+  renderStatDlg();
+}
+$("btnStatExport").addEventListener("click", () => {
+  const stamp = plainText(HOME_STATS[statCurrent].label).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  downloadTasksXlsx(statItems().map((task) => ({ task, level: 0 })), `yeu-cau-${stamp}-${today()}.xlsx`, $("btnStatExport"));
+});
 function renderHome() {
   // số liệu yêu cầu (Bảng công việc)
   const roots = rootTasks();   // chỉ đếm đầu việc cha (+ việc độc lập), không đếm việc con
   const late = roots.filter(isLate).length;
-  const statusIs = (t, name) => plainText(t.status) === plainText(name);
-  const doing = roots.filter((t) => statusIs(t, "Đã rõ yêu cầu") && t.deadline).length;      // Đã rõ yêu cầu và đã có deadline
-  const unclear = roots.filter((t) => statusIs(t, "Chưa làm rõ")).length;
-  const cancelled = roots.filter((t) => /(^|[^a-z])(huy|pending)([^a-z]|$)/.test(plainText(t.status))).length;   // Hủy hoặc Pending
-  const waiting = roots.filter((t) => !t.deadline || /(^|[^a-z])waiting([^a-z]|$)/.test(plainText(t.status))).length;   // chưa có deadline hoặc trạng thái Waiting
   const total = roots.length;   // khớp với bộ đếm "Tổng số" ở màn Yêu cầu (khi chưa lọc)
-  [["wfTotal", total], ["wfDoing", doing], ["wfUnclear", unclear], ["wfCancel", cancelled], ["wfWaiting", waiting], ["wfDone", roots.filter(isDone).length]]
-    .forEach(([id, v]) => { $(id).textContent = v; });
+  Object.entries(HOME_STATS).forEach(([id, stat]) => { $(id).textContent = roots.filter(stat.test).length; });
   // từ ver2: số đếm trên 3 lối vào + dòng tóm tắt
   const openPersonal = personalTasks.filter((t) => !t.done).length;
   const setCount = (id, n, label) => { const el = $(id); if (!el) return; el.textContent = n; el.title = `${n} ${label}`; };
@@ -707,7 +757,8 @@ function renderHome() {
   home.addEventListener("click", (e) => {
     const hit = (sel) => e.target.closest(sel);
     if (!hit("#wfUser")) $("wfMenu").hidden = true;
-    if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; renderHome(); }
+    if (hit("[data-wf-stat]")) openStatDlg(hit("[data-wf-stat]").dataset.wfStat);
+    else if (hit("[data-wf-filter]")) { wf.f = hit("[data-wf-filter]").dataset.wfFilter; renderHome(); }
     else if (hit("[data-wf-del]")) deletePersonalTask(hit("[data-wf-del]").dataset.wfDel);
     else if (hit("[data-wf-edit]")) openTaskNote(hit("[data-wf-edit]").dataset.wfEdit);
     else if (hit("[data-wf-note-hide]")) toggleNoteHome(hit("[data-wf-note-hide]").dataset.wfNoteHide);
@@ -716,6 +767,10 @@ function renderHome() {
     else if (hit("#wfAddNote")) openNote();
     else if (hit("#wfUser")) $("wfMenu").hidden = !$("wfMenu").hidden;
     else if (hit("#wfLogout")) window.SYNC_SIGNOUT?.();
+  });
+  home.addEventListener("keydown", (e) => {
+    const card = e.target.closest("[data-wf-stat]");
+    if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openStatDlg(card.dataset.wfStat); }
   });
   home.addEventListener("change", (e) => {
     const box = e.target.closest("[data-wf-toggle]");
@@ -1564,6 +1619,7 @@ function openForm(t, requestedParentId = null) {
     .forEach((k) => { form[k].value = ["ngayHop", "deadline", "deadlineCV"].includes(k) ? isoToDisplayDate(d[k]) : d[k] ?? ""; });
   renderLinkRows("logYC", toLinks(d.logYC));
   renderLinkRows("bienBan", toLinks(d.bienBan));
+  renderLinkRows("bbNghiemThu", toLinks(d.bbNghiemThu));
   form.querySelector('[data-date-picker="ngayHop"]').value = d.ngayHop || "";
   form.querySelector('[data-date-picker="deadline"]').value = d.deadline || "";
   form.querySelector('[data-date-picker="deadlineCV"]').value = d.deadlineCV || "";
@@ -1611,7 +1667,7 @@ form.addEventListener("submit", (e) => {
     const bad = toLinks(input.value).find((u) => !/^https?:\/\//i.test(u));
     if (bad) { input.setCustomValidity("Link phải bắt đầu bằng http:// hoặc https://"); input.reportValidity(); return; }
   }
-  const logYC = readLinks("logYC"), bienBan = readLinks("bienBan");
+  const logYC = readLinks("logYC"), bienBan = readLinks("bienBan"), bbNghiemThu = readLinks("bbNghiemThu");
   const ngayHop = displayDateToIso(form.ngayHop.value);
   const deadline = displayDateToIso(form.deadline.value);
   const deadlineCV = displayDateToIso(form.deadlineCV.value);
@@ -1629,7 +1685,7 @@ form.addEventListener("submit", (e) => {
     quiTrinh: form.quiTrinh.checked, ngayHop, deadline, deadlineCV,
     parentId: form.parentId.value ? tasks.find((task) => String(task.id) === form.parentId.value)?.id ?? null : null,
     status: form.status.value, phuTrach: selectedPeople(),
-    logYC, bienBan, versionBuild: form.versionBuild.value.trim(),
+    logYC, bienBan, bbNghiemThu, versionBuild: form.versionBuild.value.trim(),
   };
   const i = tasks.findIndex((x) => x.id === t.id);
   // Việc mới, hoặc đổi cha/độc lập: xếp cuối nhóm mới, renumberTasksByGroup sẽ đánh lại số liền mạch
@@ -2222,6 +2278,7 @@ const IMPORT_FIELD_ALIASES = {
   phuTrach: ["phutrach"],
   logYC: ["logyeucau", "logyc"],
   bienBan: ["bienbanlamro", "bienban"],
+  bbNghiemThu: ["bbnghiemthu", "bienbannghiemthu", "nghiemthu"],
   versionBuild: ["versionbuild", "version", "buildversion", "phienbanbuild"],
 };
 const normalizedImportHeader = (value) => String(value ?? "").trim().toLowerCase()
@@ -2273,6 +2330,7 @@ const IMPORT_RULES = [
   ["deadlineCV", (h) => (h.includes("deadline") && /(cv|congviec|noibo)/.test(h)) || h.includes("muctieu")],
   ["deadline", (h) => h.includes("deadline") || h === "hannop"],
   ["logYC", (h) => /^log/.test(h) || h.includes("ticket") || h.includes("linklog")],
+  ["bbNghiemThu", (h) => h.includes("nghiemthu")],
   ["bienBan", (h) => h.includes("bienban") || h.includes("lamro")],
   ["versionBuild", (h) => h.includes("version") || h.includes("build") || h.includes("phienban")],
   ["quiTrinh", (h) => h.includes("quytrinh") || h.includes("quitrinh")],
@@ -2293,7 +2351,7 @@ function importKeyOf(cell) {
   const rule = IMPORT_RULES.find(([, test]) => test(h));
   return rule ? rule[0] : null;
 }
-const IMPORT_LABELS = { deadlineCV: "Deadline CV", logYC: "Log yêu cầu", bienBan: "Biên bản làm rõ", versionBuild: "Version build", quiTrinh: "Qui trình" };
+const IMPORT_LABELS = { deadlineCV: "Deadline CV", logYC: "Log yêu cầu", bienBan: "Biên bản làm rõ", bbNghiemThu: "BB nghiệm thu", versionBuild: "Version build", quiTrinh: "Qui trình" };
 
 // Ô "Qui trình": tick (✓/x/1/TRUE) hoặc chữ như "Có", "Đã có"... là Có; trống, "Chưa", "Không", "Đang..." là Chưa
 function parseQuiTrinhCell(cell) {
@@ -2394,7 +2452,7 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0, sheet = {}, 
       quiTrinh: parseQuiTrinhCell(cellOf("quiTrinh", rowIndex)),
       ngayHop: dateOf("ngayHop"), deadline: dateOf("deadline"), deadlineCV: dateOf("deadlineCV"),
       status: text("status") || Object.keys(TRANG_THAI)[0] || "",
-      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: linkField("logYC"), bienBan: linkField("bienBan"), versionBuild: text("versionBuild"),
+      phuTrach: toPeople(text("phuTrach").split(/[;,|\n]+/)), logYC: linkField("logYC"), bienBan: linkField("bienBan"), bbNghiemThu: linkField("bbNghiemThu"), versionBuild: text("versionBuild"),
     });
     if (outlineLevel === 0) currentOutlineParent = recordIndex;
   });
@@ -2402,6 +2460,7 @@ function parseExcelRows(rows, XLSX, outlineRows = [], rowStart = 0, sheet = {}, 
     deadlineCV: records.filter((r) => r.deadlineCV).length,
     logYC: records.filter((r) => r.logYC.length).length,
     bienBan: records.filter((r) => r.bienBan.length).length,
+    bbNghiemThu: records.filter((r) => r.bbNghiemThu.length).length,
     versionBuild: records.filter((r) => r.versionBuild).length,
     quiTrinh: records.filter((r) => r.quiTrinh).length,
   };
@@ -2420,7 +2479,7 @@ function showImportPreview(fileName, sheetName, result) {
   const c = result.counts || {};
   $("importSummary").textContent = [
     `Tìm thấy ${result.records.length} công việc, nhận diện ${result.groupedChildren} nội dung con từ nhóm hàng Excel · Bỏ qua ${result.skippedEmpty} dòng trống và ${result.skippedInvalid} dòng không hợp lệ.`,
-    `Đọc được: Deadline CV ${c.deadlineCV ?? 0}, Log yêu cầu ${c.logYC ?? 0}, Biên bản làm rõ ${c.bienBan ?? 0}, Version build ${c.versionBuild ?? 0}, Qui trình "Có" ${c.quiTrinh ?? 0}.`,
+    `Đọc được: Deadline CV ${c.deadlineCV ?? 0}, Log yêu cầu ${c.logYC ?? 0}, Biên bản làm rõ ${c.bienBan ?? 0}, BB nghiệm thu ${c.bbNghiemThu ?? 0}, Version build ${c.versionBuild ?? 0}, Qui trình "Có" ${c.quiTrinh ?? 0}.`,
     result.missingColumns?.length ? `Không tìm thấy cột: ${result.missingColumns.join(", ")}.` : "",
     result.unknownHeaders?.length ? `Tiêu đề chưa nhận diện (bỏ qua): ${result.unknownHeaders.join(", ")}.` : "",
     result.unreadableDates ? `${result.unreadableDates} ô ngày không đọc được nên để trống.` : "",
@@ -2451,19 +2510,20 @@ const EXPORT_COLS = [
   { label: "Phụ trách", width: 22, value: (t) => toPeople(t.phuTrach).join(", ") },
   { label: "Log yêu cầu", width: 30, link: true, value: (t) => toLinks(t.logYC).join("\n") },
   { label: "Biên bản làm rõ", width: 30, link: true, value: (t) => toLinks(t.bienBan).join("\n") },
+  { label: "BB nghiệm thu", width: 30, link: true, value: (t) => toLinks(t.bbNghiemThu).join("\n") },
   { label: "Version build", width: 16, value: (t) => t.versionBuild || "" },
 ];
 const isoToExcelSerial = (iso) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   return match ? Date.UTC(+match[1], +match[2] - 1, +match[3]) / 864e5 + 25569 : "";
 };
-$("btnExport").addEventListener("click", async () => {
-  if (!exportRows.length) { alert("Không có công việc nào đang hiển thị để tải về."); return; }
-  const button = $("btnExport");
+// Xuất danh sách công việc ra file Excel (dùng chung cho nút "Tải về" ở màn Yêu cầu và nút "Xuất Excel" ở hộp thoại thẻ trang chủ)
+async function downloadTasksXlsx(items, fileName, button) {
+  if (!items.length) { alert("Không có công việc nào đang hiển thị để tải về."); return; }
   button.disabled = true;
   try {
     const XLSX = await ensureXlsx();
-    const rows = exportRows.map(({ task }) => EXPORT_COLS.map((col) => (col.date ? isoToExcelSerial(col.value(task)) : col.value(task))));
+    const rows = items.map(({ task }) => EXPORT_COLS.map((col) => (col.date ? isoToExcelSerial(col.value(task)) : col.value(task))));
     const ws = XLSX.utils.aoa_to_sheet([EXPORT_COLS.map((col) => col.label), ...rows]);
     EXPORT_COLS.forEach((col, c) => {
       rows.forEach((row, i) => {
@@ -2474,16 +2534,18 @@ $("btnExport").addEventListener("click", async () => {
       });
     });
     ws["!cols"] = EXPORT_COLS.map((col) => ({ wch: col.width }));
-    ws["!rows"] = [{}, ...exportRows.map(({ level }) => (level ? { level } : {}))]; // nội dung con thụt cấp như file nhập
+    ws["!rows"] = [{}, ...items.map(({ level }) => (level ? { level } : {}))]; // nội dung con thụt cấp như file nhập
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, ws, "Công việc");
-    XLSX.writeFile(workbook, `cong-viec-${today()}.xlsx`);
+    XLSX.writeFile(workbook, fileName);
   } catch (error) {
     alert(error.message || "Không tạo được file Excel.");
   } finally {
     button.disabled = false;
   }
-});
+}
+$("btnExport").addEventListener("click", () => downloadTasksXlsx(exportRows, `cong-viec-${today()}.xlsx`, $("btnExport")));
+
 $("importFile").addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   e.target.value = "";

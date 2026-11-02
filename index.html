@@ -40,7 +40,7 @@
       <section class="wf-stats" aria-label="Tổng quan yêu cầu">
         <div class="wf-stats-head"><span class="wf-ico"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg></span><div><h2>Danh sách yêu cầu</h2><p>Tổng quan tình hình các yêu cầu hiện tại</p></div><button type="button" class="wf-all" data-open-view="board">Xem tất cả <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button></div>
         <div class="wf-stats-grid">
-          <div class="wf-stat "><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg><div><small>Tổng số yêu cầu</small><strong id="wfTotal">0</strong></div></div><div class="wf-stat s-blue"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Đang thực hiện</small><strong id="wfDoing">0</strong></div></div><div class="wf-stat s-red"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div><small>Chưa làm rõ</small><strong id="wfUnclear">0</strong></div></div><div class="wf-stat s-violet"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg><div><small>Hủy/ Pending</small><strong id="wfCancel">0</strong></div></div><div class="wf-stat s-amber"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg><div><small>Chưa quy trình/ Waiting</small><strong id="wfWaiting">0</strong></div></div><div class="wf-stat s-green"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><div><small>Đã hoàn thành</small><strong id="wfDone">0</strong></div></div>
+          <div class="wf-stat " data-wf-stat="wfTotal" role="button" tabindex="0" title="Bấm để xem danh sách"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg><div><small>Tổng số yêu cầu</small><strong id="wfTotal">0</strong></div></div><div class="wf-stat s-blue" data-wf-stat="wfDoing" role="button" tabindex="0" title="Bấm để xem danh sách"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div><small>Đang thực hiện</small><strong id="wfDoing">0</strong></div></div><div class="wf-stat s-red" data-wf-stat="wfUnclear" role="button" tabindex="0" title="Bấm để xem danh sách"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div><small>Chưa làm rõ</small><strong id="wfUnclear">0</strong></div></div><div class="wf-stat s-violet" data-wf-stat="wfCancel" role="button" tabindex="0" title="Bấm để xem danh sách"><svg class="i" aria-hidden="true"><use href="#i-note"/></svg><div><small>Hủy/ Pending</small><strong id="wfCancel">0</strong></div></div><div class="wf-stat s-amber" data-wf-stat="wfWaiting" role="button" tabindex="0" title="Bấm để xem danh sách"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg><div><small>Chưa quy trình/ Waiting</small><strong id="wfWaiting">0</strong></div></div><div class="wf-stat s-green" data-wf-stat="wfDone" role="button" tabindex="0" title="Bấm để xem danh sách"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><div><small>Đã hoàn thành</small><strong id="wfDone">0</strong></div></div>
         </div>
       </section>
       <div class="wf-cols">
@@ -229,6 +229,11 @@
             <div class="link-rows"></div>
             <button type="button" class="link-add" data-add-link="bienBan">＋ Thêm link</button>
           </fieldset>
+          <fieldset class="link-field" data-links="bbNghiemThu">
+            <legend>BB nghiệm thu (link)</legend>
+            <div class="link-rows"></div>
+            <button type="button" class="link-add" data-add-link="bbNghiemThu">＋ Thêm link</button>
+          </fieldset>
 
           <div class="writing-pair">
             <label class="writing-field">Nội dung theo dõi
@@ -264,6 +269,19 @@
   </div>
 </dialog>
 
+<dialog id="statDlg" class="stat-dialog">
+  <div class="dlg-head">
+    <h2 id="statTitle">Danh sách yêu cầu</h2>
+    <button type="button" class="x" data-close aria-label="Đóng">&times;</button>
+  </div>
+  <div class="dlg-body stat-body">
+    <div class="stat-bar"><span id="statCount" class="stat-count"></span><button type="button" id="btnStatExport" class="primary">Xuất Excel</button></div>
+    <div class="table-wrap stat-wrap">
+      <table class="stat-table"><thead id="statHead"></thead><tbody id="statRows"></tbody></table>
+      <p id="statEmpty" class="empty" hidden>Không có yêu cầu nào trong nhóm này.</p>
+    </div>
+  </div>
+</dialog>
 <dialog id="importDlg">
   <div class="dlg-head">
     <h2>Nhập công việc từ Excel</h2>
