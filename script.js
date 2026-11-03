@@ -231,13 +231,28 @@ const displayDateToIso = (value) => {
   if (year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) return null;
   return `${yearText}-${monthText}-${dayText}`;
 };
-const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+let todayCache = "", todayStamp = 0;
+const today = () => {   // được gọi cho từng dòng khi vẽ bảng nên nhớ kết quả trong 1 giây
+  const now = Date.now();
+  if (!todayCache || now - todayStamp > 1000) { todayStamp = now; todayCache = new Date(now - new Date(now).getTimezoneOffset() * 6e4).toISOString().slice(0, 10); }
+  return todayCache;
+};
 // Trễ / Trong tuần / Tuần sau có thể tính theo "Deadline" hoặc "Deadline CV" (lưu riêng từng máy, không đồng bộ)
 const DUE_MODE_KEY = "wf-due-mode", HIDE_DONE_KEY = "wf-hide-done";
 let dueMode = "deadline";
 try { if (localStorage.getItem(DUE_MODE_KEY) === "deadlineCV") dueMode = "deadlineCV"; } catch (e) {}
 const dueOf = (t) => t[dueMode] || "";
-const plainText = (v) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+const plainTextCache = new Map();
+const plainText = (v) => {   // bỏ dấu + chữ thường; có nhớ kết quả vì được gọi lặp lại cho từng dòng
+  const raw = String(v ?? "");
+  let out = plainTextCache.get(raw);
+  if (out === undefined) {
+    out = raw.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+    if (plainTextCache.size > 5000) plainTextCache.clear();
+    plainTextCache.set(raw, out);
+  }
+  return out;
+};
 const NO_DUE_STATUS = new Set(["huy", "pending", "waiting"]);   // Hủy / Pending / Waiting: không tính trễ, trong tuần, tuần sau
 const isDone = (t) => DA_XONG.includes(t.status);
 const skipsDue = (t) => NO_DUE_STATUS.has(plainText(t.status));
@@ -303,8 +318,13 @@ try { hideDone = localStorage.getItem(HIDE_DONE_KEY) === "1"; } catch (e) {}
 let openChildParents = new Set();   // cha có ít nhất 1 việc con chưa xong (giữ lại để hiện nhóm khi đang ẩn việc đã xong)
 const passesDoneFilter = (task) => !hideDone || !isDone(task) || openChildParents.has(String(task.id));
 const collapsedGroups = new Set();
+let boardDirty = false;   // bảng Yêu cầu đang ẩn mà dữ liệu đã đổi: dựng lại khi mở
 let exportRows = []; // các dòng đang được lọc trên lưới (dùng cho nút Tải về)
+const weekRangeCache = new Map();
 const weekRange = (offset) => {
+  const cacheKey = `${today()}|${WEEK_START}|${offset}`;
+  const cached = weekRangeCache.get(cacheKey);
+  if (cached) return cached;
   const [year, month, day] = today().split("-").map(Number);
   const first = new Date(year, month - 1, day);
   // lùi về ngày bắt đầu tuần đã cài đặt (WEEK_START), rồi cộng offset tuần
@@ -312,7 +332,10 @@ const weekRange = (offset) => {
   const last = new Date(first);
   last.setDate(last.getDate() + 6);
   const toIso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  return { from: toIso(first), to: toIso(last) };
+  const range = { from: toIso(first), to: toIso(last) };
+  if (weekRangeCache.size > 60) weekRangeCache.clear();
+  weekRangeCache.set(cacheKey, range);
+  return range;
 };
 const passesQuickFilter = (task) => {
   if (!quickFilters.size) return true;
@@ -371,16 +394,12 @@ function renderHead() {
     </th>`).join("") + "<th>Thao tác</th></tr>";
 }
 
-function syncFrozenColumns(headEl = $("head"), rowsEl = $("rows")) {
-  const headers = [...headEl.querySelectorAll("th")].slice(0, 4);
+// Cố định 4 cột đầu: đọc độ rộng 1 lượt rồi ghi vào biến CSS của bảng (không ghi style từng ô, tránh buộc trình duyệt tính lại bố cục nhiều lần)
+function syncFrozenColumns(headEl = $("head")) {
+  const table = headEl.closest("table");
+  const widths = [...headEl.querySelectorAll("th")].slice(0, 4).map((header) => header.getBoundingClientRect().width);
   let left = 0;
-  headers.forEach((header, index) => {
-    const column = index + 1;
-    const offset = `${left}px`;
-    header.style.left = offset;
-    rowsEl.querySelectorAll(`td:nth-child(${column})`).forEach((cell) => { cell.style.left = offset; });
-    left += header.getBoundingClientRect().width;
-  });
+  widths.forEach((width, index) => { table.style.setProperty(`--fz${index + 1}`, `${left}px`); left += width; });
 }
 
 function render() {
@@ -397,6 +416,13 @@ function render() {
 
   taskIndex = new Map(tasks.map((task) => [String(task.id), task]));
   openChildParents = new Set(tasks.filter((task) => hasParent(task) && !isDone(task)).map((task) => String(task.parentId)));
+  if ($("workspaceScreen").hidden) {   // đang ở màn khác: chưa dựng 1000+ dòng, chỉ cập nhật phần đang xem
+    boardDirty = true;
+    renderHome();
+    if (!$("trackScreen").hidden) renderTrack();
+    return;
+  }
+  boardDirty = false;
   const q = $("fSearch").value.trim().toLowerCase();
   const filteredTasks = tasks
     .filter((t) => passesQuickFilter(t) && passesDoneFilter(t) && (!q || [t.noiDung, t.ghiChu, t.maBV, t.versionBuild, toPeople(t.phuTrach).join(" ")].join(" ").toLowerCase().includes(q)) && passes(t))
@@ -491,7 +517,6 @@ function render() {
 const wf = { f: "open", q: "", nq: "" };   // f: d30 (30 ngày) | open | late | done
 const WF_COLORS = { sage: "#6f9c6b", peach: "#f08a4b", yellow: "#e0a826", blue: "#4a82d6", lilac: "#8a63c9" };
 const isoAdd = (iso, n) => { const [y, m, d] = iso.split("-").map(Number), t = new Date(y, m - 1, d + n); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
-const weekStart = (iso) => { const [y, m, d] = iso.split("-").map(Number); return isoAdd(iso, -((new Date(y, m - 1, d).getDay() - WEEK_START + 7) % 7)); };
 const dayLabel = (d) => !d ? "Chưa đặt" : d === today() ? "Hôm nay" : d === isoAdd(today(), 1) ? "Ngày mai" : formatLocalDate(d);
 const lc = (v) => String(v ?? "").toLocaleLowerCase("vi");
 
@@ -527,6 +552,7 @@ const TRK_COLS = [
   { key: "trkGhiChu", label: "Ghi chú", type: "text", get: (t) => String(t.trkGhiChu ?? "") },
 ];
 const trkFilters = {};
+const TRK_FIELDS = ["hienTrang", "tinhTrang", "trkGhiChu"];   // dữ liệu riêng của màn Theo dõi tiến độ, nằm trong từng công việc
 
 // Giai đoạn của việc: late | w0 (tuần này) | w1 | w2; null = không thuộc danh sách
 function trackBucket(t) {
@@ -552,17 +578,41 @@ function ticketLinks(value) {
   const list = toLinks(value).filter((u) => /^https?:\/\//i.test(u));
   return list.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}">${esc(ticketLabel(u, i, list.length))}</a>`).join("");
 }
-function trackSelect(field, task, options) {
+// Ô chọn Hiện trạng / Tình trạng: lúc vẽ chỉ có "— Chọn —" và giá trị đang chọn; danh sách đầy đủ nạp khi người dùng bấm vào ô.
+// (Hàng nghìn dòng x 14 lựa chọn = hàng chục nghìn phần tử, làm màn hình này vẽ chậm.)
+const trackSelectCache = new Map();   // (cột|giá trị) -> HTML, dùng lại cho mọi dòng cùng giá trị
+const trackOptionList = (field, cur) => {
+  const options = field === "hienTrang" ? HIEN_TRANG : TINH_TRANG;
+  return cur && !options.some((o) => o[0] === cur) ? [...options, [cur, ""]] : options;
+};
+const trackOptionHtml = ([name, tipText], cur) => `<option value="${esc(name)}" title="${esc(tipText)}" ${name === cur ? "selected" : ""}>${esc(name)}</option>`;
+function trackSelect(field, task) {
   const cur = trkValue(task, field) || "";
-  const list = cur && !options.some((o) => o[0] === cur) ? [...options, [cur, ""]] : options;
-  const tip = (list.find((o) => o[0] === cur) || [])[1] || "";
-  return `<select class="trk-sel" data-trk-field="${field}" data-v="${esc(cur)}" title="${esc(tip || cur)}" aria-label="${field === "hienTrang" ? "Hiện trạng" : "Tình trạng"}">`
-    + `<option value="">— Chọn —</option>`
-    + list.map(([name, tipText]) => `<option value="${esc(name)}" title="${esc(tipText)}" ${name === cur ? "selected" : ""}>${esc(name)}</option>`).join("")
-    + `</select>`;
+  const cacheKey = `${field}|${cur}`;
+  let html = trackSelectCache.get(cacheKey);
+  if (html === undefined) {
+    const current = trackOptionList(field, cur).find((o) => o[0] === cur);
+    html = `<select class="trk-sel" data-trk-field="${field}" data-lazy="1" data-v="${esc(cur)}" title="${esc((current && current[1]) || cur)}" aria-label="${field === "hienTrang" ? "Hiện trạng" : "Tình trạng"}">`
+      + `<option value="">— Chọn —</option>${current ? trackOptionHtml(current, cur) : ""}</select>`;
+    trackSelectCache.set(cacheKey, html);
+  }
+  return html;
+}
+function fillTrackSelect(sel) {
+  if (!sel.dataset.lazy) return;
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">— Chọn —</option>` + trackOptionList(sel.dataset.trkField, cur).map((o) => trackOptionHtml(o, cur)).join("");
+  sel.value = cur;
+  delete sel.dataset.lazy;
 }
 
-const trkAutoGrow = (el) => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
+const FIELD_SIZING = typeof CSS !== "undefined" && !!CSS.supports && CSS.supports("field-sizing", "content");
+const trkAutoGrow = (el) => {
+  if (FIELD_SIZING) return;   // trình duyệt tự giãn theo nội dung
+  if (!el.value) { el.style.height = ""; return; }
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+};
 function renderTrackHead() {
   $("trackHead").innerHTML = "<tr><th>STT</th>" + TRK_COLS.map((c) => `<th><div class="th"><span>${c.label}</span><button type="button" class="fbtn ${trkFilters[c.key] ? "on" : ""}" data-col="${c.key}" aria-label="Lọc cột ${c.label}">▾</button></div></th>`).join("") + "</tr>";
 }
@@ -598,8 +648,8 @@ function renderTrack() {
         <td class="c cell-editable"${EDIT_ATTRS("deadlineCV", true)}>${fmt(t.deadlineCV)}</td>
         <td class="trk-person">${toPeople(t.phuTrach).map((p) => tag(p, "person")).join("")}</td>
         <td class="nd trk-job" title="${esc(t.noiDung)}"><span class="nd-text">${esc(t.noiDung)}</span></td>
-        <td>${trackSelect("hienTrang", t, HIEN_TRANG)}</td>
-        <td>${trackSelect("tinhTrang", t, TINH_TRANG)}</td>
+        <td>${trackSelect("hienTrang", t)}</td>
+        <td>${trackSelect("tinhTrang", t)}</td>
         <td class="trk-ticket">${ticketLinks(t.logYC)}</td>
         <td class="trk-note"><textarea class="trk-note-input" rows="1" maxlength="2000" aria-label="Ghi chú">${esc(t.trkGhiChu || "")}</textarea></td>
       </tr>`;
@@ -641,6 +691,7 @@ $("trackRows").addEventListener("change", (e) => {
   save();
   renderTrack();
 });
+["mousedown", "focusin", "keydown"].forEach((type) => $("trackRows").addEventListener(type, (e) => { if (e.target.matches && e.target.matches("select.trk-sel")) fillTrackSelect(e.target); }, true));
 $("trackRows").addEventListener("input", (e) => { if (e.target.classList.contains("trk-note-input")) trkAutoGrow(e.target); });
 $("trackRows").addEventListener("keydown", (e) => {
   if (e.target.classList.contains("trk-note-input") && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.blur(); return; }   // Enter = lưu, Shift+Enter = xuống dòng
@@ -696,7 +747,7 @@ function renderStatDlg() {
   $("statRows").innerHTML = items.map(statRowHtml).join("");
   $("statEmpty").hidden = items.length > 0;
   $("btnStatExport").disabled = !items.length;
-  syncFrozenColumns($("statHead"), $("statRows"));
+  syncFrozenColumns($("statHead"));
 }
 function openStatDlg(id) {
   if (!HOME_STATS[id]) return;
@@ -793,12 +844,17 @@ function renderHome() {
 function showAppView(view, { pushHistory = true } = {}) {
   if (!["board", "list", "notes", "track"].includes(view)) return;
   if (pushHistory && history.state?.appView !== view) history.pushState({ appView: view }, "", `#${view}`);
+  const wasBoard = !$("workspaceScreen").hidden;
   $("homeScreen").hidden = true;
   $("workspaceScreen").hidden = view !== "board";
   $("listScreen").hidden = view !== "list";
   $("notesScreen").hidden = view !== "notes";
   $("trackScreen").hidden = view !== "track";
   document.body.classList.toggle("showing-app-screen", view !== "board");
+  if (view === "board") {
+    if (!wasBoard) clearBoardFilters();   // từ trang khác quay lại: nhả hết bộ lọc để hiển thị đầy đủ
+    if (!wasBoard || boardDirty) render();
+  }
   if (view === "list") renderPersonalTasks();
   if (view === "notes") renderNotes();
   if (view === "track") renderTrack();
@@ -1527,15 +1583,19 @@ $("quickDateMode").addEventListener("change", (e) => {
   try { localStorage.setItem(DUE_MODE_KEY, dueMode); } catch (err) {}
   render();
 });
-$("btnClear").onclick = () => {
+// Nhả toàn bộ bộ lọc của bảng Yêu cầu (tìm kiếm, lọc nhanh, lọc theo cột, ẩn đã hoàn thành). Không vẽ lại.
+function clearBoardFilters() {
   $("fSearch").value = "";
   quickFilters.clear();
-  hideDone = false; $("fHideDone").checked = false;
-  try { localStorage.setItem(HIDE_DONE_KEY, "0"); } catch (err) {}
   Object.keys(filters).forEach((k) => delete filters[k]);
   closePop();
-  render();
-};
+  if (hideDone) {
+    hideDone = false;
+    $("fHideDone").checked = false;
+    try { localStorage.setItem(HIDE_DONE_KEY, "0"); } catch (err) {}
+  }
+}
+$("btnClear").onclick = () => { clearBoardFilters(); render(); };
 
 // ===== Thêm / sửa / xóa =====
 const dlg = $("dlg"), form = $("form");
@@ -1692,7 +1752,7 @@ form.addEventListener("submit", (e) => {
   if (i < 0 || String(tasks[i].parentId ?? "") !== String(t.parentId ?? "")) t.stt = 1e9;
   if (i >= 0) {
     const previousStt = Number(tasks[i].stt);
-    tasks[i] = t;
+    tasks[i] = { ...tasks[i], ...t };   // giữ lại các trường chỉ màn Theo dõi tiến độ dùng (hienTrang, tinhTrang, trkGhiChu)
     if (previousStt !== t.stt && Number.isSafeInteger(previousStt) && previousStt > 0) sttBank.push(previousStt);
   } else tasks.push(t);
   renumberTasksByGroup();
@@ -2627,6 +2687,14 @@ $("btnImportCommit").addEventListener("click", async () => {
     if (task.status && !Object.prototype.hasOwnProperty.call(TRANG_THAI, task.status)) TRANG_THAI[task.status] = nextColor(TRANG_THAI);
     toPeople(task.phuTrach).forEach((p) => { if (!PHU_TRACH.includes(p)) PHU_TRACH.push(p); });
   });
+  if (mode === "replace") {   // thay toàn bộ danh sách: giữ lại dữ liệu theo dõi của các việc trùng (cùng Mã BV + nội dung)
+    const keyOf = (task) => `${plainText(task.maBV)}|${plainText(task.noiDung)}`;
+    const previous = new Map(tasks.map((task) => [keyOf(task), task]));
+    imported.forEach((task) => {
+      const old = previous.get(keyOf(task));
+      if (old) TRK_FIELDS.forEach((field) => { if (old[field] !== undefined) task[field] = old[field]; });
+    });
+  }
   tasks = mode === "append" ? [...tasks, ...imported] : imported;
   sttBank = availableBank;
   renumberTasksByGroup();

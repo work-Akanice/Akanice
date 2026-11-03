@@ -35,6 +35,12 @@
     loadApp();
     return;
   }
+  try {   // mở sẵn kết nối tới Supabase để truy vấn đầu tiên không phải chờ bắt tay TLS
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = window.SUPABASE_URL;
+    document.head.appendChild(link);
+  } catch (e) {}
 
   // Tên đăng nhập đơn giản (vd "tram") được đổi thành email ẩn "tram@<LOGIN_DOMAIN>" khi gửi lên Supabase
   const LOGIN_DOMAIN = window.SUPABASE_LOGIN_DOMAIN || "example.com";
@@ -144,7 +150,6 @@
     if (!el) return;
     el.textContent = LABELS[s];
     el.style.color = s === "error" ? "#d93025" : "";
-    el.style.cursor = s === "update" ? "pointer" : "";
   }
 
   // Báo cho app nạp lại dữ liệu từ localStorage và vẽ lại tại chỗ (không tải lại trang).
@@ -219,10 +224,9 @@
     }
   }
 
-  async function hydrateShared() {
-    const { data, error } = await sb.from(T_SHARED).select("key,value,version");
-    if (error) throw error;
-    const rows = new Map((data || []).map((r) => [r.key, r]));
+  // data: các dòng đã tải sẵn từ server (tải song song với các truy vấn khác ở start())
+  async function hydrateShared(data) {
+    const rows = new Map(data.map((r) => [r.key, r]));
     for (const key of SHARED_KEYS) await syncShared(key, 0, rows.get(key) || null);
   }
 
@@ -299,10 +303,8 @@
     }
   }
 
-  async function hydratePersonal() {
-    const { data, error } = await sb.from(T_PERSONAL).select("key,value,updated_at");
-    if (error) throw error;
-    const rows = new Map((data || []).filter((r) => r.key.startsWith(PREFIX) && !isShared(r.key)).map((r) => [r.key, r]));
+  async function hydratePersonal(data) {
+    const rows = new Map(data.filter((r) => r.key.startsWith(PREFIX) && !isShared(r.key)).map((r) => [r.key, r]));
     const keys = new Set([...rows.keys(), ...localKeys().filter((k) => !isShared(k))]);
     for (const key of keys) await syncPersonal(key, 0, rows.get(key) || null);
     setPending(getPending().filter((k) => isShared(k)));
@@ -312,8 +314,10 @@
   const dirtyShared = new Set();
   const pullShared = new Set(), pullPersonal = new Set();   // key phát hiện đã đổi trên server
   let timer = null, flushing = false, rerun = false, retryTimer = null;
+  let ready = false;   // true sau khi đồng bộ lần đầu xong; trước đó flush() chờ, các thay đổi vẫn được ghi nhớ trong dirtyShared / hàng chờ cá nhân
 
   async function flush() {
+    if (!ready) return;
     if (flushing) { rerun = true; return; }
     const sharedKeys = [...new Set([...dirtyShared, ...pullShared])];
     const personal = [...new Set([...getPending().filter((k) => !isShared(k)), ...pullPersonal])];
@@ -504,28 +508,58 @@
   }
 
   // ===== Khởi động =====
+  // Máy đã từng đồng bộ đúng tài khoản này ("warm"): mở app NGAY bằng dữ liệu đã lưu trên máy, việc đồng bộ chạy nền
+  // và tự vẽ lại khi có thay đổi (3-way merge giữ nguyên chỉnh sửa của mình trong lúc chờ).
+  // Lần đầu / đổi tài khoản: vẫn chờ đồng bộ xong rồi mới mở app để không hiện dữ liệu cũ hay sai người.
   async function start() {
     let { data: { session } } = await sb.auth.getSession();
     if (!session) session = await showLogin();
     user = session.user;
+    const warm = localStorage.getItem(OWNER_KEY) === user.id && SHARED_KEYS.some((k) => meta[k]);
     bindOwner(user.id);   // phải chạy trước khi đồng bộ bất cứ thứ gì
     window.SYNC_USER = String(user.email || "").split("@")[0];
-    try {
-      const { data: member, error } = await sb.from(T_MEMBERS).select("user_id").eq("user_id", user.id).maybeSingle();
-      if (error) throw error;
-      if (!member) return showNoAccess();
-      await hydrateShared();
-      await hydratePersonal();
-    } catch (e) {
-      console.error("Không đồng bộ được với Supabase, dùng dữ liệu trên máy:", e);
-      state = navigator.onLine ? "error" : "offline";
+
+    // 3 truy vấn chạy song song (trước đây chạy nối đuôi nhau: thành viên -> dữ liệu chung -> dữ liệu cá nhân)
+    const fetched = Promise.all([
+      sb.from(T_MEMBERS).select("user_id").eq("user_id", user.id).maybeSingle(),
+      sb.from(T_SHARED).select("key,value,version"),
+      sb.from(T_PERSONAL).select("key,value,updated_at"),
+    ]);
+    const hydrate = async () => {
+      try {
+        const [member, shared, personal] = await fetched;
+        if (member.error) throw member.error;
+        if (!member.data) return false;
+        if (shared.error) throw shared.error;
+        if (personal.error) throw personal.error;
+        await hydrateShared(shared.data || []);
+        await hydratePersonal(personal.data || []);
+      } catch (e) {
+        console.error("Không đồng bộ được với Supabase, dùng dữ liệu trên máy:", e);
+        state = navigator.onLine ? "error" : "offline";
+      }
+      return true;
+    };
+    const goLive = () => {
+      ready = true;
+      setStatus(state);
+      subscribeRealtime();
+      setInterval(() => { if (navigator.onLine && document.visibilityState === "visible") checkRemote(); }, 60000);
+      flush();
+    };
+
+    if (warm) {
+      installHook();
+      loadApp();
+      addSyncUi();
+      if (await hydrate()) goLive(); else showNoAccess();
+    } else {
+      if (!(await hydrate())) return showNoAccess();
+      installHook();
+      loadApp();
+      addSyncUi();
+      goLive();
     }
-    installHook();
-    loadApp();
-    addSyncUi();
-    subscribeRealtime();
-    setInterval(() => { if (navigator.onLine && document.visibilityState === "visible") checkRemote(); }, 60000);
-    flush();
   }
   start().catch((e) => { console.error(e); loadApp(); });
 })();

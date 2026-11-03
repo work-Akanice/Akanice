@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Theo dõi công việc</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preload" href="script.js" as="script">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -62,7 +64,7 @@
       </div>
     </div>
   </main>
-  <section id="workspaceScreen" class="workspace-screen">
+  <section id="workspaceScreen" class="workspace-screen" hidden>
   <header class="top">
     <span id="count" class="count"></span>
     <button id="btnImport">Nhập Excel</button>
@@ -341,9 +343,9 @@
 
 
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
-<script src="supabase-config.js"></script>
-<script src="supabase-sync.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
+<script defer src="supabase-config.js"></script>
+<script defer src="supabase-sync.js"></script>
 
 
 </body>
