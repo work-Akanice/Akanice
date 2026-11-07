@@ -502,8 +502,7 @@ function render() {
 
   $("empty").hidden = list.length > 0;
   // Bộ đếm chỉ tính yêu cầu cha / yêu cầu độc lập, KHÔNG tính yêu cầu con
-  const rootKeyOf = (task) => (hasParent(task) && taskById.has(String(task.parentId)) ? String(task.parentId) : String(task.id));
-  const shownCount = new Set(filteredTasks.map(rootKeyOf)).size;
+  const shownCount = filteredTasks.filter((task) => !hasParent(task) || !taskById.has(String(task.parentId))).length;   // chỉ đếm yêu cầu cha (yêu cầu con không đếm, kể cả khi cha bị lọc ẩn)
   $("count").innerHTML = `<span class="count-label">Tổng số:</span><strong class="count-total">${shownCount}</strong>`;
   renderHome();
   if (!$("trackScreen").hidden) renderTrack();
@@ -523,17 +522,15 @@ const lc = (v) => String(v ?? "").toLocaleLowerCase("vi");
 // ===== Màn hình Theo dõi tiến độ: việc trễ + tuần này + 2 tuần tiếp theo =====
 // Hiện trạng / Tình trạng lưu thẳng vào từng công việc (task.hienTrang, task.tinhTrang) nên được đồng bộ và merge như các ô khác.
 const HIEN_TRANG = [
-  ["Open", "BA log xong nghiệp vụ"],
-  ["In progress", "Dev đang làm"],
-  ["Resolve", "Dev làm xong"],
-  ["Test on develop", "Đang test trên môi trường test"],
-  ["Pass test", "Done trên môi trường test"],
-  ["Ready for stable", "Đã đẩy lên môi trường Stable"],
-  ["Test on stable", "Đang test trên môi trường Stable"],
-  ["Pass stable", "Đợi build Product"],
-  ["Product", "Đã build lên môi trường Product"],
+  ["BA", "Đang phân tích"],
+  ["DEV", "Đang code"],
+  ["QC", "Đang test"],
+  ["Pass test", "Đợi build Stable"],
+  ["Stable", "Đã build Stable"],
+  ["Pass Stable", "Đợi build Product"],
+  ["Product", "Đã build Product"],
 ];
-const TINH_TRANG = [["Đúng tiến độ", ""], ["Có nguy cơ trễ", ""], ["Trễ deadline", ""], ["Hủy/ Pending", ""], ["Đã xác nhận", ""]];
+const TINH_TRANG = [["Đúng tiến độ", ""], ["Có nguy cơ trễ", ""], ["Trễ deadline", ""], ["Đổi deadline", ""], ["Hủy/ Pending", ""], ["Đã xác nhận", ""]];
 const TRK_GROUPS = [["late", "Trễ hạn"], ["w0", "Tuần này"], ["w1", "Tuần sau"], ["w2", "Tuần sau nữa"]];
 const trk = { f: "all", q: "" };
 // Yêu cầu đã hoàn thành (Done) mặc định hiện trạng "Product" và tình trạng "Đã xác nhận" (chưa chọn gì thì hiển thị mặc định, chọn khác thì giữ lựa chọn)
@@ -710,10 +707,10 @@ const taskHasNote = (item) => Boolean(String(item.noteText || item.note || "").t
 const statusIs = (t, name) => plainText(t.status) === plainText(name);
 const HOME_STATS = {
   wfTotal: { label: "Tổng số yêu cầu", test: () => true },
-  wfDoing: { label: "Đang thực hiện", test: (t) => statusIs(t, "Đã rõ yêu cầu") && !!t.deadline },   // Đã rõ yêu cầu và đã có deadline
-  wfUnclear: { label: "Chưa làm rõ", test: (t) => statusIs(t, "Chưa làm rõ") },
-  wfCancel: { label: "Hủy/ Pending", test: (t) => /(^|[^a-z])(huy|pending)([^a-z]|$)/.test(plainText(t.status)) },
-  wfWaiting: { label: "Chưa quy trình/ Waiting", test: (t) => !t.deadline || /(^|[^a-z])waiting([^a-z]|$)/.test(plainText(t.status)) },
+  wfDoing: { label: "Đang thực hiện", test: (t) => !isDone(t) && statusIs(t, "Đã rõ yêu cầu") && !!t.deadline },   // Đã rõ yêu cầu và đã có deadline
+  wfUnclear: { label: "Chưa làm rõ", test: (t) => !isDone(t) && statusIs(t, "Chưa làm rõ") },
+  wfCancel: { label: "Hủy/ Pending", test: (t) => !isDone(t) && /(^|[^a-z])(huy|pending)([^a-z]|$)/.test(plainText(t.status)) },
+  wfWaiting: { label: "Chưa quy trình/ Waiting", test: (t) => !isDone(t) && (!t.deadline || /(^|[^a-z])waiting([^a-z]|$)/.test(plainText(t.status))) },
   wfDone: { label: "Đã hoàn thành", test: (t) => isDone(t) },
 };
 let statCurrent = "wfTotal";
@@ -780,7 +777,7 @@ function renderHome() {
   const since = isoAdd(today(), -29);
   const inWindow = (i) => !i.createdAt || String(i.createdAt).slice(0, 10) >= since;
   const rows = personalTasks.filter((i) => inWindow(i) && (wf.f === "d30" || (wf.f === "open" && !i.done) || (wf.f === "late" && listIsLate(i)) || (wf.f === "done" && i.done)) && (!q || lc(i.title).includes(q)))
-    .sort(wf.f === "done" ? doneCompare : listCompare);
+    .sort(nearestDueCompare);   // từ trên xuống: ngày gần hôm nay nhất -> xa nhất (không có hạn nằm cuối)
   $("wfRows").innerHTML = rows.map((i) => {
     const [label, cls] = i.done ? ["Đã hoàn thành", "ok"] : listIsLate(i) ? ["Quá hạn", "late"] : ["Chưa hoàn thành", "todo"];
     return `<tr class="${i.done ? "is-done" : ""}${isTodayTask(i) ? " is-today" : ""}"><td class="w-chk"><input type="checkbox" data-wf-toggle="${esc(i.id)}" ${i.done ? "checked" : ""} aria-label="Hoàn thành: ${esc(i.title)}"></td><td><button type="button" class="wf-link" data-wf-edit="${esc(i.id)}">${esc(i.title)}</button>${taskHasNote(i) ? '<span class="wf-note-mark" title="Có ghi chú nội dung" aria-label="Có ghi chú nội dung">✎</span>' : ""}</td><td class="${listIsLate(i) ? "wf-red" : ""}">${dayLabel(i.deadline)}</td><td><span class="wf-pill ${cls}">${label}</span></td><td class="w-more"><button type="button" class="wf-trash" data-wf-del="${esc(i.id)}" title="Xóa công việc" aria-label="Xóa: ${esc(i.title)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button></td></tr>`;
@@ -901,9 +898,9 @@ const listCompare = (a, b) => {
   if (a.done && b.done) return String(b.doneAt || "").localeCompare(String(a.doneAt || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   return (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31");
 };
-// Danh sách "Đã hoàn thành" ở trang chủ: deadline gần hôm nay nhất xếp trước (cùng khoảng cách thì hạn sau xếp trước); không có hạn xuống cuối
+// Todo ở trang chủ: deadline gần hôm nay nhất xếp trước (cùng khoảng cách thì hạn sau xếp trước); không có hạn xuống cuối
 const daysFromToday = (iso) => { const [y, m, d] = iso.split("-").map(Number), [ty, tm, td] = today().split("-").map(Number); return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 864e5); };
-const doneCompare = (a, b) => {
+const nearestDueCompare = (a, b) => {
   if (!a.deadline || !b.deadline) {
     if (a.deadline || b.deadline) return a.deadline ? -1 : 1;
   } else {
